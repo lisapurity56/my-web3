@@ -30,7 +30,7 @@
           <a href="#flavours">Flavours</a>
           <a href="#ritual">The Joliza ritual</a>
           <a href="#contact">Contact</a>
-          <a class="order-cta" href="mailto:hello@joliza.co?subject=Joliza%20Yogourt%20Order">Order now <span>↗</span></a>
+          <a class="order-cta" href="#contact" data-inquiry-type="order">Order now <span>↗</span></a>
           <a class="nav-cta" href="#find-us">Find Joliza <span>↗</span></a>
         </nav>
       </div>
@@ -49,7 +49,7 @@
             </p>
             <div class="hero-actions">
               <a class="button button-dark" href="#flavours">Explore our flavours <span>↗</span></a>
-              <a class="button button-order" href="mailto:hello@joliza.co?subject=Joliza%20Yogourt%20Order">Order Joliza <span>↗</span></a>
+              <a class="button button-order" href="#contact" data-inquiry-type="order">Order Joliza <span>↗</span></a>
               <a class="text-link" href="#our-story">Why Joliza <span>→</span></a>
             </div>
             <div class="hero-note">
@@ -118,25 +118,37 @@
               <div class="flavour-top"><span>01</span><span class="card-dot"></span></div>
               <h3>Plain Yogourt</h3>
               <p>Rich, creamy, and beautifully smooth.</p>
-              <a href="#find-us" aria-label="Find Plain Yogourt"> <span>↗</span></a>
+              <a href="#contact" data-inquiry-type="order" data-product="Plain Yogourt" aria-label="Order Plain Yogourt"> <span>↗</span></a>
             </article>
             <article class="flavour-card sage">
               <div class="flavour-top"><span>02</span><span class="card-dot"></span></div>
               <h3>Coconut Yogourt</h3>
               <p>Silky, tropical, and gently refreshing.</p>
-              <a href="#find-us" aria-label="Find Coconut Yogourt"> <span>↗</span></a>
+              <a href="#contact" data-inquiry-type="order" data-product="Coconut Yogourt" aria-label="Order Coconut Yogourt"> <span>↗</span></a>
             </article>
             <article class="flavour-card lavender">
               <div class="flavour-top"><span>03</span><span class="card-dot"></span></div>
               <h3>Fruit Yogourt</h3>
               <p>Bright fruit folded into calm cream.</p>
-              <a href="#find-us" aria-label="Find Fruit Yogourt"> <span>↗</span></a>
+              <a href="#contact" data-inquiry-type="order" data-product="Fruit Yogourt" aria-label="Order Fruit Yogourt"> <span>↗</span></a>
             </article>
             <article class="flavour-card peach">
               <div class="flavour-top"><span>04</span><span class="card-dot"></span></div>
               <h3>Fura Yogourt</h3>
               <p>A nourishing local favourite, made with care.</p>
-              <a href="#find-us" aria-label="Find Fura Yogurt"> <span>↗</span></a>
+              <a href="#contact" data-inquiry-type="order" data-product="Fura Yogourt" aria-label="Order Fura Yogourt"> <span>↗</span></a>
+            </article>
+            <article class="flavour-card gold">
+              <div class="flavour-top"><span>05</span><span class="card-dot"></span></div>
+              <h3>Greek Yogourt</h3>
+              <p>Thick, creamy, and beautifully rich.</p>
+              <a href="#contact" data-inquiry-type="order" data-product="Greek Yogourt" aria-label="Order Greek Yogourt"> <span>↗</span></a>
+            </article>
+            <article class="flavour-card rose">
+              <div class="flavour-top"><span>06</span><span class="card-dot"></span></div>
+              <h3>Parfait</h3>
+              <p>Layered fruit, crunch, and a little joy.</p>
+              <a href="#contact" data-inquiry-type="order" data-product="Parfait" aria-label="Order Parfait"> <span>↗</span></a>
             </article>
           </div>
         </div>
@@ -181,7 +193,7 @@
             </p>
             <div class="flyer-actions">
               <button class="button button-dark" id="print-button">Print the flyer <span>↗</span></button>
-              <a class="text-link" href="mailto:hello@joliza.co">hello@joliza.co <span>→</span></a>
+              <a class="text-link" href="#contact">Write to us <span>→</span></a>
 
             </div>
           </div>
@@ -200,13 +212,19 @@
             favourite way to enjoy it, we would love to hear from you.
           </p>
           <div class="contact-details">
-            <a href="mailto:lisapurity56@gmail.com"><span>Email</span>lisapurity56@gmail.com</a>
+            <p><span>Email</span>lisapurity56@gmail.com</p>
             <a href="tel:08064948591"><span>Call us</span>08064948591</a>
-            <p><span>Hours</span>Monday – Friday, 9am – 5pm</p>
+            <p><span>Hours</span>Monday – Saturday, 9am – 5pm</p>
           </div>
         </div>
-        <form class="contact-form" action="mailto:hello@joliza.co" method="post" enctype="text/plain">
+        <form class="contact-form" action="/api/inquiries" method="post">
           <div class="form-heading"><span>01</span><span>Write to us</span></div>
+          <label for="inquiry-type">How can we help?</label>
+          <select id="inquiry-type" name="inquiry_type" required>
+            <option value="general">A general question</option>
+            <option value="order">Placing an order</option>
+            <option value="stockist">Stocking Joliza</option>
+          </select>
           <label for="name">Your name</label>
           <input id="name" name="name" type="text" placeholder="How should we call you?" required />
           <label for="email">Email address</label>
@@ -215,7 +233,12 @@
           <input id="email" name="email" type="email" placeholder="you@example.com" required />
           <label for="message">Your message</label>
           <textarea id="message" name="message" rows="4" placeholder="Tell us a little something..." required></textarea>
+          <div class="form-trap" aria-hidden="true">
+            <label for="website">Leave this field empty</label>
+            <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+          </div>
           <button class="button button-dark" type="submit">Send a little note <span>↗</span></button>
+          <p class="form-status" id="form-status" role="status" aria-live="polite" hidden></p>
         </form>
       </div>
     </section>
