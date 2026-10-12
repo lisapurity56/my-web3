@@ -2,7 +2,7 @@ services:
   - type: web
     name: joliza-yogourt
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: python3 -m compileall -q server.py
     startCommand: python3 server.py
     healthCheckPath: /api/health
