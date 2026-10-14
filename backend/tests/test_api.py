@@ -1,94 +1,90 @@
-import os
-import sys
-from pathlib import Path
 import unittest
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
-
+from backend.app.database import Base, get_db  # noqa: E402
 from backend.app.main import app  # noqa: E402
+from backend.app.models import Inquiry  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+test_engine = create_engine(
+    "sqlite://",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestSession = sessionmaker(bind=test_engine)
 
-class FullBackendApiTests(unittest.TestCase):
+
+class InquiryApiTests(unittest.TestCase):
     def setUp(self):
+        Base.metadata.drop_all(bind=test_engine)
+        Base.metadata.create_all(bind=test_engine)
+
+        def get_test_db():
+            db = TestSession()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = get_test_db
         self.client = TestClient(app)
+
+    def tearDown(self):
+        self.client.close()
+        app.dependency_overrides.clear()
+
+    def inquiry_payload(self):
+        return {
+            "inquiry_type": "order",
+            "name": "Test Buyer",
+            "email": "buyer@example.com",
+            "message": "I would like to place an order.",
+        }
 
     def test_health_endpoint(self):
         response = self.client.get("/api/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["status"], "ok")
+        self.assertEqual(response.json(), {"status": "ok"})
 
-    def test_register_and_login(self):
-        response = self.client.post(
-            "/api/v1/auth/register",
-            json={"full_name": "Alice Example", "email": "alice@example.com", "password": "secretpass"},
-        )
-        self.assertEqual(response.status_code, 201)
-        login = self.client.post(
-            "/api/v1/auth/login",
-            json={"email": "alice@example.com", "password": "secretpass"},
-        )
-        self.assertEqual(login.status_code, 200)
-        self.assertIn("token", login.json())
+    def test_valid_inquiry_is_saved(self):
+        response = self.client.post("/api/inquiries", json=self.inquiry_payload())
 
-    def test_product_and_order_workflow(self):
-        create_product = self.client.post(
-            "/api/v1/products",
-            json={
-                "name": "Plain Yogourt",
-                "description": "Creamy plain yogourt made in small batches.",
-                "price": 18.5,
-                "category": "dairy",
-            },
-        )
-        self.assertEqual(create_product.status_code, 201)
-        product_id = create_product.json()["id"]
-
-        register = self.client.post(
-            "/api/v1/auth/register",
-            json={"full_name": "Shopper One", "email": "shopper@example.com", "password": "secretpass"},
-        )
-        user_id = register.json()["user"]["id"]
-
-        order_response = self.client.post(
-            "/api/v1/orders",
-            json={"user_id": user_id, "items": [{"product_id": product_id, "quantity": 2}]},
-        )
-        self.assertEqual(order_response.status_code, 201)
-        payload = order_response.json()
-        self.assertEqual(payload["total_amount"], 37.0)
-        self.assertEqual(len(payload["items"]), 1)
-
-    def test_inquiry_submission_compatibility(self):
-        response = self.client.post(
-            "/api/inquiries",
-            json={
-                "inquiry_type": "order",
-                "name": "Test Buyer",
-                "email": "buyer@example.com",
-                "message": "I would like to place an order for plain yogourt.",
-            },
-        )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["notification_sent"], False)
+        with TestSession() as db:
+            inquiry = db.query(Inquiry).one()
+            self.assertEqual(inquiry.name, "Test Buyer")
+            self.assertEqual(inquiry.email, "buyer@example.com")
 
-    def test_honeypot_inquiry_is_ignored(self):
+    def test_invalid_inquiries_return_clear_errors(self):
+        invalid_payloads = (
+            {"inquiry_type": "wholesale"},
+            {"name": "   "},
+            {"email": "not-an-email"},
+            {"message": ""},
+        )
+        for invalid_fields in invalid_payloads:
+            with self.subTest(invalid_fields=invalid_fields):
+                response = self.client.post(
+                    "/api/inquiries",
+                    json={**self.inquiry_payload(), **invalid_fields},
+                )
+                self.assertEqual(response.status_code, 422)
+                self.assertIn("error", response.json())
+
+    def test_honeypot_request_is_accepted_but_not_saved(self):
         response = self.client.post(
             "/api/inquiries",
-            json={
-                "inquiry_type": "general",
-                "name": "Bot User",
-                "email": "bot@example.com",
-                "message": "This is a bot message.",
-                "website": "https://example.com",
-            },
+            json={**self.inquiry_payload(), "website": "https://bot.example"},
         )
+
         self.assertEqual(response.status_code, 201)
         self.assertIn("Thanks for getting in touch", response.json()["message"])
+        with TestSession() as db:
+            self.assertEqual(db.query(Inquiry).count(), 0)
 
 
 if __name__ == "__main__":

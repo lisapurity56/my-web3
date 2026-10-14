@@ -38,6 +38,6 @@ def get_db():
 
 
 def init_db():
-    from backend.app import models as _models  # noqa: F401
+    from backend.app.models import Inquiry  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
