@@ -18,7 +18,7 @@ services:
       - key: JOLIZA_SMTP_USERNAME
         value: lisapurity56@gmail.com
       - key: JOLIZA_SMTP_PASSWORD
-        sync: falsecom
+        sync: false
       - key: JOLIZA_EMAIL_FROM
         value: lisapurity56@gmail.com
       - key: JOLIZA_NOTIFY_EMAIL

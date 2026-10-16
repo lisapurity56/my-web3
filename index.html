@@ -35,6 +35,9 @@
         </nav>
       </div>
     </header>
+    <button class="cart-trigger" id="cart-open" type="button" aria-haspopup="dialog">
+      Cart <span id="cart-count" aria-label="0 items">0</span>
+    </button>
 
     <main id="top">
       <section class="hero">
@@ -118,37 +121,37 @@
               <div class="flavour-top"><span>01</span><span class="card-dot"></span></div>
               <h3>Plain Yogourt</h3>
               <p>Rich, creamy, and beautifully smooth.</p>
-              <a href="#contact" data-inquiry-type="order" data-product="Plain Yogourt" aria-label="Order Plain Yogourt"> <span>↗</span></a>
+              <button class="add-to-cart" type="button" data-add-to-cart="Plain Yogourt">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card sage">
               <div class="flavour-top"><span>02</span><span class="card-dot"></span></div>
               <h3>Coconut Yogourt</h3>
               <p>Silky, tropical, and gently refreshing.</p>
-              <a href="#contact" data-inquiry-type="order" data-product="Coconut Yogourt" aria-label="Order Coconut Yogourt"> <span>↗</span></a>
+              <button class="add-to-cart" type="button" data-add-to-cart="Coconut Yogourt">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card lavender">
               <div class="flavour-top"><span>03</span><span class="card-dot"></span></div>
               <h3>Fruit Yogourt</h3>
               <p>Bright fruit folded into calm cream.</p>
-              <a href="#contact" data-inquiry-type="order" data-product="Fruit Yogourt" aria-label="Order Fruit Yogourt"> <span>↗</span></a>
+              <button class="add-to-cart" type="button" data-add-to-cart="Fruit Yogourt">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card peach">
               <div class="flavour-top"><span>04</span><span class="card-dot"></span></div>
               <h3>Fura Yogourt</h3>
               <p>A nourishing local favourite, made with care.</p>
-              <a href="#contact" data-inquiry-type="order" data-product="Fura Yogourt" aria-label="Order Fura Yogourt"> <span>↗</span></a>
+              <button class="add-to-cart" type="button" data-add-to-cart="Fura Yogourt">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card gold">
               <div class="flavour-top"><span>05</span><span class="card-dot"></span></div>
               <h3>Greek Yogourt</h3>
               <p>Thick, creamy, and beautifully rich.</p>
-              <a href="#contact" data-inquiry-type="order" data-product="Greek Yogourt" aria-label="Order Greek Yogourt"> <span>↗</span></a>
+              <button class="add-to-cart" type="button" data-add-to-cart="Greek Yogourt">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card rose">
               <div class="flavour-top"><span>06</span><span class="card-dot"></span></div>
               <h3>Parfait</h3>
               <p>Layered fruit, crunch, and a little joy.</p>
-              <a href="#contact" data-inquiry-type="order" data-product="Parfait" aria-label="Order Parfait"> <span>↗</span></a>
+              <button class="add-to-cart" type="button" data-add-to-cart="Parfait">Add to cart <span>+</span></button>
             </article>
           </div>
         </div>
@@ -200,6 +203,24 @@
         </div>
       </section>
     </main>
+
+    <dialog class="cart-dialog" id="cart-dialog" aria-labelledby="cart-title">
+      <div class="cart-heading">
+        <div>
+          <p class="eyebrow"><span></span> Your selection</p>
+          <h2 id="cart-title">Your cart</h2>
+        </div>
+        <button class="cart-close" id="cart-close" type="button" aria-label="Close cart">×</button>
+      </div>
+      <p class="cart-empty" id="cart-empty">Your cart is empty. Add a favourite to get started.</p>
+      <div class="cart-items" id="cart-items"></div>
+      <div class="cart-footer">
+        <p class="cart-note">Prices and availability will be confirmed when we contact you.</p>
+        <button class="button button-dark" id="cart-checkout" type="button" disabled>
+          Continue to order details <span>↗</span>
+        </button>
+      </div>
+    </dialog>
 
     <section class="contact-section section" id="contact">
       <div class="container contact-grid">

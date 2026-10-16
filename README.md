@@ -5,6 +5,11 @@ inquiries. Submissions are stored in a local SQLite database. When SMTP is
 configured, the backend also emails each inquiry to the site owner. This is an
 inquiry form, not an online checkout or payment system.
 
+Visitors can add yogourt flavours to the on-page cart, adjust quantities, and
+add a preference or note for each item. Continuing to order fills the inquiry
+form with the cart contents; the owner confirms availability and prices when
+replying. The cart does not take payment or create a confirmed order.
+
 ## Publish the complete site on Render
 
 The `render.yaml` blueprint deploys the website and Python inquiry backend as a
