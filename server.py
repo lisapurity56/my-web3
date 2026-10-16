@@ -311,14 +311,14 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                 email_settings, inquiry_id, inquiry_type, name, email, message
             )
         except smtplib.SMTPAuthenticationError as error:
-            self.log_error(
+            self.log_error(self.log_error("Failed to send inquiry notification: %r", error)
                 "SMTP authentication rejected (code %s); verify the SMTP username and "
                 "provider app password",
                 error.smtp_code,
             )
             notification_sent = False
         except (OSError, smtplib.SMTPException, ssl.SSLError) as error:
-            self.log_error("Failed to send inquiry notification (%s)", type(error).__name__)
+            self.log_error("Failed to send inquiry notification: %r", error)
             notification_sent = False
 
         response_message = (
