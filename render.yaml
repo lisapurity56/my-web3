@@ -11,6 +11,16 @@ services:
         value: 0.0.0.0
       - key: JOLIZA_DB_PATH
         value: /var/data/inquiries.sqlite3
+      - key: JOLIZA_SMTP_HOST
+        value: smtp.gmail.com
+      - key: JOLIZA_SMTP_PORT
+        value: "465"
+      - key: JOLIZA_SMTP_USERNAME
+        value: lisapurity56@gmail.com
+      - key: JOLIZA_SMTP_PASSWORD
+        sync: falsecom
+      - key: JOLIZA_EMAIL_FROM
+        value: lisapurity56@gmail.com
       - key: JOLIZA_NOTIFY_EMAIL
         value: lisapurity56@gmail.com
     disk:

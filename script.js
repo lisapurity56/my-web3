@@ -51,7 +51,10 @@ contactForm?.addEventListener("submit", async (event) => {
       throw new Error(result.error || "We couldn't send your message. Please try again.");
     }
     contactForm.reset();
-    formStatus.textContent = result.message;
+    formStatus.textContent =
+      result.notification_sent === true
+        ? `${result.message} Email notification sent.`
+        : result.message;
   } catch (error) {
     formStatus.textContent =
       error instanceof TypeError
