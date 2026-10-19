@@ -73,6 +73,64 @@ class InquiryApiTests(unittest.TestCase):
             self.assertEqual(inquiry.name, "Test Buyer")
             self.assertEqual(inquiry.email, "buyer@example.com")
 
+    def test_preorder_and_event_requests_can_be_saved_without_email(self):
+        for inquiry_type in ("preorder", "event"):
+            with self.subTest(inquiry_type=inquiry_type):
+                payload = {
+                    **self.inquiry_payload(),
+                    "inquiry_type": inquiry_type,
+                    "email": "",
+                }
+                with patch.dict(
+                    "os.environ",
+                    {
+                        "JOLIZA_SMTP_HOST": "",
+                        "JOLIZA_SMTP_PORT": "",
+                        "JOLIZA_SMTP_USERNAME": "",
+                        "JOLIZA_SMTP_PASSWORD": "",
+                        "JOLIZA_EMAIL_FROM": "",
+                        "JOLIZA_NOTIFY_EMAIL": "",
+                    },
+                ):
+                    response = self.client.post("/api/inquiries", json=payload)
+
+                self.assertEqual(response.status_code, 201)
+                with TestSession() as db:
+                    inquiry = db.query(Inquiry).one()
+                    self.assertEqual(inquiry.inquiry_type, inquiry_type)
+                    self.assertEqual(inquiry.email, "")
+                    db.delete(inquiry)
+                    db.commit()
+
+    def test_notification_succeeds_without_reply_to_email(self):
+        smtp = MagicMock()
+        smtp.__enter__.return_value = smtp
+        env = {
+            "JOLIZA_SMTP_HOST": "smtp.example.com",
+            "JOLIZA_SMTP_PORT": "587",
+            "JOLIZA_SMTP_USERNAME": "",
+            "JOLIZA_SMTP_PASSWORD": "",
+            "JOLIZA_EMAIL_FROM": "from@example.com",
+            "JOLIZA_NOTIFY_EMAIL": "notify@example.com",
+        }
+        payload = {
+            **self.inquiry_payload(),
+            "inquiry_type": "event",
+            "email": "",
+        }
+        with (
+            patch.dict("os.environ", env),
+            patch(
+                "backend.app.email_notifications.smtplib.SMTP", return_value=smtp
+            ),
+        ):
+            response = self.client.post("/api/inquiries", json=payload)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.json()["notification_sent"])
+        notification = smtp.send_message.call_args.args[0]
+        self.assertIsNone(notification.get("Reply-To"))
+
     def test_inquiry_notification_uses_starttls(self):
         smtp = MagicMock()
         smtp.__enter__.return_value = smtp
@@ -167,6 +225,7 @@ class InquiryApiTests(unittest.TestCase):
             {"inquiry_type": "wholesale"},
             {"name": "   "},
             {"email": "not-an-email"},
+            {"email": "", "inquiry_type": "general"},
             {"message": ""},
         )
         for invalid_fields in invalid_payloads:

@@ -65,7 +65,8 @@ def send_inquiry_notification(
     notification["Subject"] = f"Joliza website inquiry #{inquiry_id}: {inquiry_type}"
     notification["From"] = settings.sender
     notification["To"] = settings.recipient
-    notification["Reply-To"] = email
+    if email:
+        notification["Reply-To"] = email
     notification.set_content(
         f"Inquiry #{inquiry_id}\n"
         f"Type: {inquiry_type}\n"

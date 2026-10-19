@@ -1,6 +1,6 @@
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -15,7 +15,7 @@ def normalize_email(value: str) -> str:
 class InquiryCreate(BaseModel):
     inquiry_type: str = Field(..., min_length=1, max_length=50)
     name: str = Field(..., min_length=1, max_length=100)
-    email: str = Field(..., min_length=5, max_length=254)
+    email: str = Field(default="", max_length=254)
     message: str = Field(..., min_length=1, max_length=5000)
     website: str = ""
 
@@ -23,8 +23,10 @@ class InquiryCreate(BaseModel):
     @classmethod
     def validate_inquiry_type(cls, value: str) -> str:
         cleaned = value.strip().lower()
-        if cleaned not in {"general", "order", "stockist"}:
-            raise ValueError("Inquiry type must be general, order, or stockist.")
+        if cleaned not in {"general", "order", "preorder", "event", "stockist"}:
+            raise ValueError(
+                "Inquiry type must be general, order, preorder, event, or stockist."
+            )
         return cleaned
 
     @field_validator("name", "message")
@@ -38,9 +40,15 @@ class InquiryCreate(BaseModel):
     @field_validator("email")
     @classmethod
     def clean_email(cls, value: str) -> str:
-        return normalize_email(value)
+        return normalize_email(value) if value.strip() else ""
 
     @field_validator("website")
     @classmethod
     def clean_website(cls, value: str) -> str:
         return value.strip()
+
+    @model_validator(mode="after")
+    def require_email_for_contact_inquiries(self):
+        if self.inquiry_type in {"general", "stockist"} and not self.email:
+            raise ValueError("Email is required for general and stockist inquiries.")
+        return self
