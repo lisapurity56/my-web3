@@ -2,7 +2,7 @@ services:
   - type: web
     name: joliza-yogourt
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: python3 -m compileall -q server.py
     startCommand: python3 server.py
     healthCheckPath: /api/health
@@ -10,6 +10,7 @@ services:
       - key: HOST
         value: 0.0.0.0
       - key: JOLIZA_DB_PATH
+<<<<<<< HEAD
         value: /var/data/inquiries.sqlite3
       - key: JOLIZA_SMTP_HOST
         value: smtp.gmail.com
@@ -21,9 +22,8 @@ services:
         sync: false
       - key: JOLIZA_EMAIL_FROM
         value: lisapurity56@gmail.com
+=======
+        value: /tmp/inquiries.sqlite3
+>>>>>>> e60286d1104232f0494c835cb46222097da04427
       - key: JOLIZA_NOTIFY_EMAIL
         value: lisapurity56@gmail.com
-    disk:
-      name: joliza-inquiries
-      mountPath: /var/data
-      sizeGB: 1
