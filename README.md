@@ -13,27 +13,28 @@ replying. The cart does not take payment or create a confirmed order.
 ## Publish the complete site on Render
 
 The `render.yaml` blueprint deploys the website and Python inquiry backend as a
-single service. This keeps the contact form and site on the same origin. It
-also attaches a persistent disk for the SQLite inquiry database. The Render
-Starter service and persistent disk are paid resources; check Render's current
-pricing before deploying.
+single Free service. This keeps the contact form and site on the same origin.
+On the Free plan, the SQLite database is stored in `/tmp`, so inquiries may be
+lost when the service restarts or redeploys. Render's Free service may also
+spin down when idle. For durable inquiry storage, upgrade to a paid service and
+attach a persistent disk, then set `JOLIZA_DB_PATH` to a file on that disk.
 
 1. Push this repository to GitHub.
 2. In Render, choose **New → Blueprint**, connect this repository, and apply
-   the `render.yaml` configuration. Approve the paid web service and disk.
+   the `render.yaml` configuration.
 3. Wait for the service to deploy. Render assigns a public `onrender.com`
    address; open it and check that `/api/health` returns `{"status":"ok"}`.
 4. Submit a test message through the site's contact form. Without SMTP settings,
-   inquiries are still saved to the persistent disk, but email notifications
-   are unavailable.
+   inquiries are saved to the service's temporary filesystem, but email
+   notifications are unavailable.
 5. In the Render service's **Environment** settings, set
    `JOLIZA_SMTP_USERNAME` and `JOLIZA_EMAIL_FROM` to your Gmail address, and
    set `JOLIZA_SMTP_PASSWORD` to a Gmail App Password. The blueprint sets
    Gmail's SMTP host and port; save the settings and redeploy.
 
 The service reads Render's `PORT` environment variable and binds to `0.0.0.0`.
-The configured persistent disk stores inquiries across deploys and restarts.
-Do not set the database path to a location outside that disk.
+For durable inquiries, use a paid service with a persistent disk and configure
+the database path inside the disk's mount directory.
 
 The repository also has a GitHub Pages workflow for a static preview at
 <https://lisapurity56.github.io/my-web3/>. GitHub Pages does not run the Python
