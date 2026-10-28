@@ -19,6 +19,7 @@ class BackendTests(unittest.TestCase):
         self.db_path_patch = patch.object(server, "DB_PATH", self.db_path)
         self.db_path_patch.start()
         server.recent_submissions.clear()
+        server.recent_review_submissions.clear()
         server.connect_database().close()
 
         self.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.JolizaHandler)
@@ -61,6 +62,58 @@ class BackendTests(unittest.TestCase):
             body=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
+
+    def submit_review(self, **overrides):
+        payload = {
+            "name": "Test Reviewer",
+            "rating": 5,
+            "comment": "Creamy and delicious.",
+        }
+        payload.update(overrides)
+        return self.request(
+            "/api/reviews",
+            method="POST",
+            body=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+
+    def test_reviews_endpoint_returns_approved_reviews(self):
+        status, payload = self.request("/api/reviews")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, [])
+
+        with server.connect_database() as connection:
+            connection.execute(
+                "INSERT INTO reviews (name, rating, comment, approved) VALUES (?, ?, ?, 1)",
+                ("Test Reviewer", 5, "Creamy and delicious."),
+            )
+
+        status, payload = self.request("/api/reviews")
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            payload,
+            [{"name": "Test Reviewer", "rating": 5, "comment": "Creamy and delicious."}],
+        )
+
+    def test_review_submission_is_saved_for_moderation(self):
+        status, payload = self.submit_review()
+        self.assertEqual(status, 201)
+        self.assertIn("moderation", payload["message"])
+
+        with server.connect_database() as connection:
+            review = connection.execute(
+                "SELECT name, rating, comment, approved FROM reviews"
+            ).fetchone()
+        self.assertEqual(review, ("Test Reviewer", 5, "Creamy and delicious.", 0))
+
+        status, public_reviews = self.request("/api/reviews")
+        self.assertEqual(status, 200)
+        self.assertEqual(public_reviews, [])
+
+    def test_invalid_review_is_rejected(self):
+        status, payload = self.submit_review(rating=6)
+        self.assertEqual(status, 400)
+        self.assertIn("rating", payload["error"])
 
     def test_valid_inquiry_is_saved_even_if_email_is_not_configured(self):
         with patch.object(server, "send_inquiry_notification", return_value=False):

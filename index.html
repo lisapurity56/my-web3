@@ -275,7 +275,10 @@
       </div>
       <p class="cart-empty" id="cart-empty">Your cart is empty. Add a favourite to get started.</p>
       <div class="cart-items" id="cart-items"></div>
-      <div class="cart-total"><span>Total</span><strong id="cart-total">To be confirmed</strong></div>
+      <div class="cart-summary" id="cart-summary" hidden>
+        <div class="cart-breakdown" id="cart-breakdown"></div>
+        <div class="cart-total"><span>Total</span><strong id="cart-total"></strong></div>
+      </div>
       <p class="cart-note">Delivery fees, availability, and timing will be confirmed before fulfillment.</p>
       <button class="button button-dark cart-checkout-button" id="cart-checkout" type="button" disabled>Checkout <span>↗</span></button>
       <form class="checkout-form" id="checkout-form" hidden>
@@ -337,7 +340,7 @@
             <label for="website">Leave this field empty</label>
             <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
           </div>
-          <button class="button button-dark" type="submit">Send message on WhatsApp <span>↗</span></button>
+          <a class="button button-dark" href="https://wa.me/2348064948591">Send message on WhatsApp <span>↗</span></a>
           <p class="contact-whatsapp-note">You'll be taken to WhatsApp to send your message.</p>
           <p class="form-status" id="form-status" role="status" aria-live="polite" hidden></p>
         </form>
@@ -382,10 +385,12 @@
         <a class="brand footer-brand" href="#top">
           <img class="brand-logo" src="joliza-logo.png" alt="Joliza Yogourt" />
         </a>
-        <p>Made for gentle moments.</p>
-        <a class="footer-story-link" href="#our-story">Why Joliza <span>→</span></a>
-        <div class="footer-goodness"><span class="footer-stamp">100%</span><span>goodness</span></div>
-        <div class="socials"><a href="#" aria-label="Instagram">ig</a><a href="#" aria-label="Pinterest">p</a><a href="#" aria-label="Facebook">f</a></div>
+        <div class="footer-top-details">
+          <p>Made for gentle moments.</p>
+          <a class="footer-story-link" href="#our-story">Why Joliza <span>→</span></a>
+          <div class="footer-goodness"><span class="footer-stamp">100%</span><span>goodness</span></div>
+          <div class="socials"><a href="#" aria-label="Instagram">ig</a><a href="#" aria-label="Pinterest">p</a><a href="#" aria-label="Facebook">f</a></div>
+        </div>
       </div>
       <div class="container footer-bottom"><span>© 2024 Joliza Yogourt</span><span>Goodness, cultured slowly.</span><span>Made with care</span></div>
     </footer>

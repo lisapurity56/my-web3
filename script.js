@@ -37,7 +37,7 @@ const PRODUCTS = {
   },
 };
 
-const WHATSAPP_NUMBER = "2348064948591";
+const WHATSAPP_LINK = "https://wa.me/2348064948591";
 const BUSINESS_EMAIL = "lisapurity56@gmail.com";
 const BULK_DISCOUNT_RATE = 0.05;
 const EVENT_DISCOUNT_RATE = 0.10;
@@ -45,6 +45,12 @@ const BULK_DISCOUNT_THRESHOLD = 10;
 const EVENT_DISCOUNT_THRESHOLD = 200;
 const PREORDER_NOTICE_DAYS = 2;
 const CART_STORAGE_KEY = "joliza-cart-v1";
+
+function whatsappMessageUrl(message) {
+  const url = new URL(WHATSAPP_LINK);
+  url.searchParams.set("text", message);
+  return url.toString();
+}
 
 const menuToggle = document.querySelector(".menu-toggle");
 const siteNav = document.querySelector(".site-nav");
@@ -57,6 +63,8 @@ const cartPanel = document.querySelector("#cart-panel");
 const cartBackdrop = document.querySelector("#cart-backdrop");
 const cartItems = document.querySelector("#cart-items");
 const cartEmpty = document.querySelector("#cart-empty");
+const cartSummary = document.querySelector("#cart-summary");
+const cartBreakdown = document.querySelector("#cart-breakdown");
 const cartCount = document.querySelector("#cart-count");
 const cartOpen = document.querySelector("#cart-open");
 const cartCheckout = document.querySelector("#cart-checkout");
@@ -129,6 +137,7 @@ function renderCart() {
   cartCount.setAttribute("aria-label", `${quantity} ${quantity === 1 ? "item" : "items"}`);
   cartOpen.setAttribute("aria-label", `Open cart, ${quantity} ${quantity === 1 ? "item" : "items"}`);
   cartEmpty.hidden = cart.length > 0;
+  cartSummary.hidden = cart.length === 0;
   cartCheckout.disabled = cart.length === 0;
   cartTotal.textContent = formatMoney(total);
 
@@ -188,18 +197,21 @@ function renderCart() {
     cartItems.append(row);
   });
 
-  const totals = document.createElement("div");
-  totals.className = "cart-breakdown";
+  cartBreakdown.replaceChildren();
   const subtotalRow = document.createElement("p");
-  subtotalRow.innerHTML = `<span>Subtotal</span><strong>${formatMoney(subtotal)}</strong>`;
-  const discountRow = document.createElement("p");
-  discountRow.className = "cart-discount";
-  discountRow.innerHTML = `<span>Bulk discount (${Math.round(BULK_DISCOUNT_RATE * 100)}%)</span><strong>−${formatMoney(discount)}</strong>`;
-  const totalRow = document.createElement("p");
-  totalRow.className = "cart-total-row";
-  totalRow.innerHTML = `<span>Total</span><strong>${formatMoney(total)}</strong>`;
-  totals.append(subtotalRow, discountRow, totalRow);
-  cartItems.append(totals);
+  subtotalRow.append("Subtotal", document.createElement("strong"));
+  subtotalRow.lastElementChild.textContent = formatMoney(subtotal);
+  cartBreakdown.append(subtotalRow);
+  if (discount > 0) {
+    const discountRow = document.createElement("p");
+    discountRow.className = "cart-discount";
+    discountRow.append(
+      `Bulk discount (${Math.round(BULK_DISCOUNT_RATE * 100)}%)`,
+      document.createElement("strong"),
+    );
+    discountRow.lastElementChild.textContent = `−${formatMoney(discount)}`;
+    cartBreakdown.append(discountRow);
+  }
 
   const discountMessage = document.querySelector("#discount-message");
   if (discountMessage) {
@@ -380,7 +392,7 @@ checkoutForm?.addEventListener("submit", (event) => {
 
   const calculations = cartCalculations();
   const message = buildCartMessage(details, calculations);
-  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`, "_blank");
+  const whatsappUrl = whatsappMessageUrl(message);
   cart = [];
   persistCart();
   renderCart();
@@ -393,6 +405,7 @@ checkoutForm?.addEventListener("submit", (event) => {
   checkoutStatus.classList.add("success");
   checkoutStatus.textContent = "Thank you! We'll confirm on WhatsApp shortly.";
   checkoutStatus.scrollIntoView({ block: "nearest" });
+  window.location.assign(whatsappUrl);
 });
 
 menuToggle?.addEventListener("click", () => {
@@ -483,16 +496,12 @@ contactForm?.addEventListener("submit", (event) => {
     ...(details.email.trim() ? [`Email: ${details.email.trim()}`] : []),
     `Message: ${details.message.trim()}`,
   ].join("\n");
-  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`, "_blank");
-  contactForm.reset();
-  formStatus.hidden = false;
-  formStatus.classList.remove("error");
-  formStatus.textContent = "Thank you! We'll reply on WhatsApp shortly.";
-  for (const field of fields) {
-    field.input.removeAttribute("aria-invalid");
-    field.error.hidden = true;
-    field.error.textContent = "";
-  }
+  window.location.assign(whatsappMessageUrl(message));
+});
+
+contactForm?.querySelector('a[href^="https://wa.me/"]')?.addEventListener("click", (event) => {
+  event.preventDefault();
+  contactForm.requestSubmit();
 });
 
 function updateEventSummary() {
@@ -572,7 +581,7 @@ eventForm?.addEventListener("submit", (event) => {
     `Total: ${formatMoney(subtotal - discount)}`,
     ...(details.note ? [`Note: ${details.note}`] : []),
   ].join("\n");
-  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`, "_blank");
+  window.open(whatsappMessageUrl(message), "_blank");
   eventForm.reset();
   updateEventSummary();
   eventStatus.hidden = false;
@@ -646,7 +655,10 @@ reviewForm?.addEventListener("submit", async (event) => {
     const response = await fetch("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.fromEntries(new FormData(reviewForm))),
+      body: JSON.stringify({
+        ...Object.fromEntries(new FormData(reviewForm)),
+        rating: Number(reviewForm.querySelector('input[name="rating"]:checked')?.value),
+      }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "We couldn't submit your review.");
