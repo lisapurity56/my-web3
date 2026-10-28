@@ -67,6 +67,7 @@ STATIC_FILES = {
     "joliza flyer.png",
 }
 recent_submissions = defaultdict(deque)
+recent_review_submissions = defaultdict(deque)
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,18 @@ def connect_database():
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+            comment TEXT NOT NULL,
+            approved INTEGER NOT NULL DEFAULT 0 CHECK (approved IN (0, 1)),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     connection.commit()
     try:
         DB_PATH.chmod(0o600)
@@ -195,6 +208,32 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             send_json(self, 200, {"status": "ok"})
             return
 
+        if path == "/api/reviews":
+            try:
+                with connect_database() as connection:
+                    reviews = connection.execute(
+                        """
+                        SELECT name, rating, comment
+                        FROM reviews
+                        WHERE approved = 1
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 20
+                        """
+                    ).fetchall()
+            except (sqlite3.Error, OSError):
+                self.log_error("Failed to load reviews")
+                send_json(self, 500, {"error": "Reviews couldn't be loaded."})
+                return
+            send_json(
+                self,
+                200,
+                [
+                    {"name": name, "rating": rating, "comment": comment}
+                    for name, rating, comment in reviews
+                ],
+            )
+            return
+
         if not is_static_asset(path):
             send_json(self, 404, {"error": "Not found."})
             return
@@ -214,7 +253,11 @@ class JolizaHandler(SimpleHTTPRequestHandler):
         super().do_HEAD()
 
     def do_POST(self):
-        if urlsplit(self.path).path != "/api/inquiries":
+        path = urlsplit(self.path).path
+        if path == "/api/reviews":
+            self.create_review()
+            return
+        if path != "/api/inquiries":
             send_json(self, 404, {"error": "Not found."})
             return
         if self.headers.get_content_type() != "application/json":
@@ -318,7 +361,7 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             )
             notification_sent = False
         except (OSError, smtplib.SMTPException, ssl.SSLError) as error:
-            self.log_error("Failed to send inquiry notification (%s)", type(error).__name__)
+            self.log_error("Failed to send inquiry notification: %r", error)
             notification_sent = False
 
         response_message = (
@@ -334,6 +377,87 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                 "message": response_message,
                 "notification_sent": notification_sent,
             },
+        )
+
+    def create_review(self):
+        if self.headers.get_content_type() != "application/json":
+            send_json(self, 415, {"error": "Send the review as JSON."})
+            return
+
+        content_length = self.headers.get("Content-Length")
+        try:
+            body_length = int(content_length)
+        except (TypeError, ValueError):
+            send_json(self, 400, {"error": "Invalid request body."})
+            return
+        if body_length < 1 or body_length > MAX_BODY_BYTES:
+            send_json(self, 413, {"error": "The review is too large."})
+            return
+
+        try:
+            payload = json.loads(self.rfile.read(body_length))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            send_json(self, 400, {"error": "Invalid JSON."})
+            return
+        if not isinstance(payload, dict):
+            send_json(self, 400, {"error": "Invalid review data."})
+            return
+
+        website = payload.get("website", "")
+        if not isinstance(website, str):
+            send_json(self, 400, {"error": "Invalid review data."})
+            return
+        if website.strip():
+            send_json(
+                self,
+                201,
+                {"message": "Thanks for sharing your review. It will appear after moderation."},
+            )
+            return
+
+        client_key = self.client_address[0]
+        submissions = recent_review_submissions[client_key]
+        now = time.monotonic()
+        while submissions and now - submissions[0] >= RATE_LIMIT_WINDOW_SECONDS:
+            submissions.popleft()
+        if len(submissions) >= RATE_LIMIT_COUNT:
+            send_json(self, 429, {"error": "Too many reviews. Please try again later."})
+            return
+
+        name = payload.get("name")
+        rating = payload.get("rating")
+        comment = payload.get("comment")
+        if not isinstance(name, str) or type(rating) is not int or not isinstance(comment, str):
+            send_json(self, 400, {"error": "Invalid review data."})
+            return
+        name = name.strip()
+        comment = comment.strip()
+        if not name or len(name) > 100:
+            send_json(self, 400, {"error": "Enter your name (up to 100 characters)."})
+            return
+        if not 1 <= rating <= 5:
+            send_json(self, 400, {"error": "Choose a rating from 1 to 5 stars."})
+            return
+        if not comment or len(comment) > 1500:
+            send_json(self, 400, {"error": "Enter a review (up to 1,500 characters)."})
+            return
+
+        try:
+            with connect_database() as connection:
+                connection.execute(
+                    "INSERT INTO reviews (name, rating, comment) VALUES (?, ?, ?)",
+                    (name, rating, comment),
+                )
+        except (sqlite3.Error, OSError):
+            self.log_error("Failed to save a review")
+            send_json(self, 500, {"error": "We couldn't save your review. Please try again later."})
+            return
+
+        submissions.append(now)
+        send_json(
+            self,
+            201,
+            {"message": "Thanks for sharing your review. It will appear after moderation."},
         )
 
     def log_message(self, format, *args):

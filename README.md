@@ -5,6 +5,11 @@ inquiries. Submissions are stored in a local SQLite database. When SMTP is
 configured, the backend also emails each inquiry to the site owner. This is an
 inquiry form, not an online checkout or payment system.
 
+Visitors can add yogourt flavours to the on-page cart, adjust quantities, and
+add a preference or note for each item. Continuing to order fills the inquiry
+form with the cart contents; the owner confirms availability and prices when
+replying. The cart does not take payment or create a confirmed order.
+
 ## Publish the complete site on Render
 
 The `render.yaml` blueprint deploys the website and Python inquiry backend as a
@@ -21,8 +26,10 @@ pricing before deploying.
 4. Submit a test message through the site's contact form. Without SMTP settings,
    inquiries are still saved to the persistent disk, but email notifications
    are unavailable.
-5. To enable email notifications, add the SMTP environment variables listed
-   below in the Render service's **Environment** settings, then redeploy.
+5. In the Render service's **Environment** settings, set
+   `JOLIZA_SMTP_USERNAME` and `JOLIZA_EMAIL_FROM` to your Gmail address, and
+   set `JOLIZA_SMTP_PASSWORD` to a Gmail App Password. The blueprint sets
+   Gmail's SMTP host and port; save the settings and redeploy.
 
 The service reads Render's `PORT` environment variable and binds to `0.0.0.0`.
 The configured persistent disk stores inquiries across deploys and restarts.
@@ -51,13 +58,14 @@ permissions on POSIX systems.
 ## Enable inquiry email notifications
 
 Without SMTP settings, the backend still saves inquiries and reports that email
-notifications are not configured. To enable notifications, set these
-environment variables before starting the server, or put them in a `.env` file
-in the repository root:
+notifications are not configured. The Render blueprint sets Gmail's SMTP host
+and port and prompts for the sender address and credentials as private
+environment variables. Locally, set the following before starting the server,
+or put them in a `.env` file in the repository root:
 
 ```sh
 JOLIZA_SMTP_HOST=smtp.gmail.com
-JOLIZA_SMTP_PORT=587
+JOLIZA_SMTP_PORT=465
 JOLIZA_SMTP_USERNAME=your-sending-address@gmail.com
 JOLIZA_SMTP_PASSWORD=your-email-provider-app-password
 JOLIZA_EMAIL_FROM=your-sending-address@gmail.com
@@ -69,9 +77,9 @@ environment take precedence. Keep `.env` private and do not commit mail
 credentials to the repository.
 
 Use an app password or SMTP credential from your email provider, not your
-regular account password. Port `587` uses STARTTLS; port `465` uses implicit
-TLS. The SMTP username and password may both be omitted if the provider does
-not require authentication. Never commit mail credentials to the repository.
+regular account password. For Gmail, enable 2-Step Verification and create an
+App Password. Port `587` uses STARTTLS; port `465` uses implicit TLS. Never
+commit mail credentials to the repository.
 If email delivery fails, the inquiry remains saved and the server logs the
 failure without logging the submitted message or email address.
 
