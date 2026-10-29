@@ -195,7 +195,13 @@ def send_json(handler, status, payload, head_only=False):
 
 def is_static_asset(path):
     asset = unquote(path.lstrip("/")) or "index.html"
-    return asset in STATIC_FILES
+    if asset in STATIC_FILES:
+        return True
+    return (
+        asset.startswith("image/")
+        and ".." not in asset
+        and asset.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"))
+    )
 
 
 class JolizaHandler(SimpleHTTPRequestHandler):
