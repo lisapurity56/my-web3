@@ -20,12 +20,32 @@
     <header class="site-header">
       <div class="container nav-wrap">
         <a class="brand" href="#top" aria-label="Joliza Yogourt home">
-          <img class="brand-logo" src="joliza-logo.png" alt="Joliza Yogourt" />
+          <svg class="brand-logo" viewBox="0 0 945 1092" aria-hidden="true">
+            <defs>
+              <mask id="header-logo-wordmark" maskUnits="userSpaceOnUse">
+                <rect width="945" height="1092" fill="white" />
+                <rect x="276" y="840" width="394" height="62" fill="black" />
+              </mask>
+            </defs>
+            <image href="joliza-logo.png" width="945" height="1092" mask="url(#header-logo-wordmark)" />
+            <text
+              x="472.5"
+              y="894"
+              fill="#003b19"
+              font-family="Arial, Helvetica, sans-serif"
+              font-size="58"
+              font-weight="600"
+              letter-spacing="12"
+              text-anchor="middle"
+              textLength="380"
+              lengthAdjust="spacingAndGlyphs"
+            >YOGOURT</text>
+          </svg>
         </a>
-        <button class="menu-toggle" aria-label="Open navigation" aria-expanded="false">
+        <button class="menu-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="site-navigation">
           <span></span><span></span>
         </button>
-        <nav class="site-nav">
+        <nav class="site-nav" id="site-navigation">
           <a href="#our-story">Our story</a>
           <a href="#flavours">Flavours</a>
           <a href="#pre-order">Pre-order</a>
@@ -113,7 +133,7 @@
               <img class="flavour-photo" src="image/plain yogourt.jpeg" alt="Joliza plain yogourt" loading="lazy" />
               <h3>Plain Yogourt</h3>
               <p>Rich, creamy, and beautifully smooth.</p>
-              <span class="product-meta">450g · <strong>₦2,500</strong></span>
+              <span class="product-meta">35cl · <strong>₦2,500</strong></span>
               <button class="add-to-cart" type="button" data-add-to-cart="plain">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card sage">
@@ -121,7 +141,7 @@
               <img class="flavour-photo" src="image/coconut yogourt.jpeg" alt="Joliza coconut yogourt" loading="lazy" />
               <h3>Coconut Yogourt</h3>
               <p>Silky, tropical, and gently refreshing.</p>
-              <span class="product-meta">450g · <strong>₦3,000</strong></span>
+              <span class="product-meta">35cl · <strong>₦1,500</strong></span>
               <button class="add-to-cart" type="button" data-add-to-cart="coconut">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card lavender">
@@ -129,7 +149,7 @@
               <img class="flavour-photo" src="image/Joliza Fruit Yogurt Freshness.jpeg" alt="Joliza fruit yogourt" loading="lazy" />
               <h3>Fruit Yogourt</h3>
               <p>Bright fruit folded into calm cream.</p>
-              <span class="product-meta">450g · <strong>₦3,000</strong></span>
+              <span class="product-meta">35cl · <strong>₦3,000</strong></span>
               <button class="add-to-cart" type="button" data-add-to-cart="fruit">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card peach">
@@ -137,7 +157,7 @@
               <img class="flavour-photo" src="image/fura yogourt.jpeg" alt="Joliza fura yogourt" loading="lazy" />
               <h3>Fura Yogourt</h3>
               <p>A nourishing local favourite, made with care.</p>
-              <span class="product-meta">450g · <strong>₦3,000</strong></span>
+              <span class="product-meta">35cl · <strong>₦1,800</strong></span>
               <button class="add-to-cart" type="button" data-add-to-cart="fura">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card gold">
@@ -146,7 +166,7 @@
               <h3>Greek Yogourt</h3>
               <p>Thick, creamy, and beautifully rich.</p>
 
-              <span class="product-meta">450g · <strong>₦3,500</strong></span>
+              <span class="product-meta">350ml · <strong>₦4,000</strong></span>
               <button class="add-to-cart" type="button" data-add-to-cart="greek">Add to cart <span>+</span></button>
             </article>
             <article class="flavour-card rose">
@@ -154,9 +174,27 @@
               <img class="flavour-photo" src="image/Joliza Berry Granola Parfait.jpeg" alt="Joliza berry parfait" loading="lazy" />
               <h3>Parfait</h3>
               <p>Layered fruit, crunch, and a little joy.</p>
-              <span class="product-meta">300g · <strong>₦3,500</strong></span>
+              <span class="product-meta">350ml · <strong>₦5,000</strong></span>
               <button class="add-to-cart" type="button" data-add-to-cart="parfait">Add to cart <span>+</span></button>
             </article>
+          </div>
+          <div class="size-price-panel">
+            <div class="size-price-heading">
+              <p class="eyebrow"><span></span> More sizes &amp; special orders</p>
+              <h3>A little more<br /><i>to love.</i></h3>
+              <p>Explore larger pots and made-to-order favourites.</p>
+            </div>
+            <div class="size-price-details">
+              <ul class="size-price-list">
+                <li><span><strong>Coconut Yogourt</strong><small>500ml</small></span><strong class="size-price">₦3,000</strong></li>
+                <li><span><strong>Fura Yogourt</strong><small>500ml</small></span><strong class="size-price">₦3,600</strong></li>
+                <li><span><strong>Parfait</strong><small>500ml</small></span><strong class="size-price">₦7,000</strong></li>
+                <li><span><strong>Greek Yogourt</strong><small>1 litre</small></span><strong class="size-price">₦7,500</strong></li>
+                <li><span><strong>Fruit Yogourt</strong><small>500ml</small></span><strong class="size-price">₦6,000</strong></li>
+                <li><span><strong>Plain Yogourt</strong><small>Sweetened or unsweetened · 1 litre</small></span><strong class="size-price">₦6,000</strong></li>
+              </ul>
+              <p class="size-price-note">Special toppings or custom orders? Share your preferences with us; we’ll confirm any additional cost with your order before proceeding.</p>
+            </div>
           </div>
         </div>
       </section>
@@ -205,7 +243,6 @@
               <p class="flyer-kicker">Slow cultured · Simply lovely</p>
               <h2>Meet your<br /><i>new favourite.</i></h2>
               <p class="flyer-copy">Creamy, honest yogourt<br />for gentle everyday rituals.</p>
-              <div class="flyer-footer"><span>Joliza Yogourt</span><span>joliza.co</span></div>
             </div>
           </div>
           <div class="flyer-copy-block">
@@ -213,7 +250,7 @@
             <h2>Your next<br /><i>favourite pot.</i></h2>
             <p>
               Looking for Joliza? Find us in select grocers, cafés, and little neighbourhood
-              markets. Or download our shareable flyer and tell a friend.
+              markets. We’re based in Karu, Abuja. Or download our shareable flyer and tell a friend.
             </p>
             <div class="flyer-actions">
               <button class="button button-dark" id="print-button">Print the flyer <span>↗</span></button>
@@ -382,7 +419,27 @@
     <footer class="site-footer">
       <div class="container footer-top">
         <a class="brand footer-brand" href="#top">
-          <img class="brand-logo" src="joliza-logo.png" alt="Joliza Yogourt" />
+          <svg class="brand-logo" viewBox="0 0 945 1092" role="img" aria-label="Joliza Yogourt logo">
+            <defs>
+              <mask id="footer-logo-wordmark" maskUnits="userSpaceOnUse">
+                <rect width="945" height="1092" fill="white" />
+                <rect x="276" y="840" width="394" height="62" fill="black" />
+              </mask>
+            </defs>
+            <image href="joliza-logo.png" width="945" height="1092" mask="url(#footer-logo-wordmark)" />
+            <text
+              x="472.5"
+              y="894"
+              fill="#003b19"
+              font-family="Arial, Helvetica, sans-serif"
+              font-size="58"
+              font-weight="600"
+              letter-spacing="12"
+              text-anchor="middle"
+              textLength="380"
+              lengthAdjust="spacingAndGlyphs"
+            >YOGOURT</text>
+          </svg>
         </a>
         <div class="footer-top-details">
           <p>Made for gentle moments.</p>
@@ -391,7 +448,7 @@
           <div class="socials"><a href="#" aria-label="Instagram">ig</a><a href="#" aria-label="Pinterest">p</a><a href="#" aria-label="Facebook">f</a></div>
         </div>
       </div>
-      <div class="container footer-bottom"><span>© 2024 Joliza Yogourt</span><span>Goodness, cultured slowly.</span><span>Made with care</span></div>
+      <div class="container footer-bottom"><span>© 2026 Joliza Yogourt</span><span>Goodness, cultured slowly.</span><span>Made with care</span></div>
     </footer>
     <script src="script.js"></script>
   </body>

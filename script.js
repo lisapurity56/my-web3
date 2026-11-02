@@ -1,38 +1,38 @@
 const PRODUCTS = {
   plain: {
     name: "Plain Yogourt",
-    size: "450g",
+    size: "35cl",
     price: 2500,
     image: "image/plain yogourt.jpeg",
   },
   coconut: {
     name: "Coconut Yogourt",
-    size: "450g",
-    price: 3000,
+    size: "35cl",
+    price: 1500,
     image: "image/coconut yogourt.jpeg",
   },
   fruit: {
     name: "Fruit Yogourt",
-    size: "450g",
+    size: "35cl",
     price: 3000,
     image: "image/Joliza Fruit Yogurt Freshness.jpeg",
   },
   fura: {
     name: "Fura Yogourt",
-    size: "450g",
-    price: 3000,
+    size: "35cl",
+    price: 1800,
     image: "image/fura yogourt.jpeg",
   },
   greek: {
     name: "Greek Yogourt",
-    size: "450g",
-    price: 3500,
+    size: "350ml",
+    price: 4000,
     image: "image/greek yogourt.jpeg",
   },
   parfait: {
     name: "Parfait",
-    size: "300g",
-    price: 3500,
+    size: "350ml",
+    price: 5000,
     image: "image/Joliza Berry Granola Parfait.jpeg",
   },
 };
@@ -82,6 +82,20 @@ const eventStatus = document.querySelector("#event-status");
 const reviewForm = document.querySelector("#review-form");
 const reviewStatus = document.querySelector("#review-status");
 const reviewList = document.querySelector("#review-list");
+
+function setNavigationOpen(isOpen) {
+  if (!menuToggle || !siteNav) return;
+  siteNav.classList.toggle("open", isOpen);
+  menuToggle.setAttribute("aria-expanded", String(isOpen));
+  menuToggle.setAttribute("aria-label", isOpen ? "Close navigation" : "Open navigation");
+}
+
+menuToggle?.addEventListener("click", () => {
+  setNavigationOpen(menuToggle.getAttribute("aria-expanded") !== "true");
+});
+siteNav?.addEventListener("click", (event) => {
+  if (event.target instanceof Element && event.target.closest("a")) setNavigationOpen(false);
+});
 
 function loadCart() {
   try {
@@ -308,6 +322,10 @@ document.querySelector("#cart-close")?.addEventListener("click", closeCart);
 cartBackdrop?.addEventListener("click", closeCart);
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && menuToggle?.getAttribute("aria-expanded") === "true") {
+    setNavigationOpen(false);
+    menuToggle.focus();
+  }
   if (!cartPanel?.classList.contains("is-open")) return;
   if (event.key === "Escape") {
     closeCart();
