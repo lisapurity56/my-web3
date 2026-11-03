@@ -317,6 +317,132 @@ function buildCartMessage(details, calculations) {
   return lines.join("\n");
 }
 
+function showReviewStatus(message, isError = false) {
+  if (!reviewStatus) return;
+  reviewStatus.hidden = false;
+  reviewStatus.classList.toggle("error", isError);
+  reviewStatus.textContent = message;
+}
+
+async function loadReviews() {
+  if (!reviewList) return;
+  reviewList.setAttribute("aria-busy", "true");
+
+  try {
+    const response = await fetch("/api/reviews", {
+      headers: { Accept: "application/json" },
+    });
+    if (response.status === 404) {
+      const errorMessage = document.createElement("p");
+      errorMessage.className = "review-message review-message-error";
+      errorMessage.textContent = "Reviews aren't available on this static preview. Open the Render-hosted website to view and submit reviews.";
+      reviewList.replaceChildren(errorMessage);
+      return;
+    }
+    if (!response.ok) throw new Error(`Review request failed (${response.status}).`);
+
+    const reviews = await response.json();
+    if (!Array.isArray(reviews) || reviews.some((review) => (
+      !review
+      || typeof review.name !== "string"
+      || !Number.isInteger(review.rating)
+      || review.rating < 1
+      || review.rating > 5
+      || typeof review.comment !== "string"
+    ))) {
+      throw new TypeError("The reviews response is invalid.");
+    }
+
+    reviewList.replaceChildren();
+    if (reviews.length === 0) {
+      const emptyMessage = document.createElement("p");
+      emptyMessage.className = "review-message";
+      emptyMessage.textContent = "No reviews yet. Be the first to share your experience.";
+      reviewList.append(emptyMessage);
+      return;
+    }
+
+    for (const review of reviews) {
+      const card = document.createElement("article");
+      card.className = "review-card";
+
+      const stars = document.createElement("p");
+      stars.className = "review-stars";
+      stars.setAttribute("aria-label", `${review.rating} out of 5 stars`);
+      stars.textContent = `${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}`;
+
+      const comment = document.createElement("blockquote");
+      comment.textContent = review.comment;
+
+      const author = document.createElement("p");
+      author.className = "review-author";
+      author.textContent = review.name;
+
+      card.append(stars, comment, author);
+      reviewList.append(card);
+    }
+  } catch (error) {
+    console.error("Unable to load reviews.", error);
+    reviewList.replaceChildren();
+    const errorMessage = document.createElement("p");
+    errorMessage.className = "review-message review-message-error";
+    errorMessage.textContent = "Reviews couldn't be loaded right now. Please try again later.";
+    reviewList.append(errorMessage);
+  } finally {
+    reviewList.setAttribute("aria-busy", "false");
+  }
+}
+
+reviewForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!reviewForm.reportValidity()) return;
+
+  const formData = new FormData(reviewForm);
+  const submitButton = reviewForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  if (reviewStatus) {
+    reviewStatus.hidden = true;
+    reviewStatus.classList.remove("error");
+  }
+
+  try {
+    const response = await fetch("/api/reviews", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: formData.get("name"),
+        rating: Number(formData.get("rating")),
+        comment: formData.get("comment"),
+      }),
+    });
+    const result = await response.json();
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      throw new TypeError("The review response is invalid.");
+    }
+    if (!response.ok) {
+      throw new Error(typeof result.error === "string" ? result.error : "Your review couldn't be submitted.");
+    }
+
+    reviewForm.reset();
+    showReviewStatus(
+      typeof result.message === "string"
+        ? result.message
+        : "Thanks for sharing your review. It will appear after moderation.",
+    );
+  } catch (error) {
+    console.error("Unable to submit review.", error);
+    showReviewStatus(
+      error instanceof Error ? error.message : "Your review couldn't be submitted. Please try again.",
+      true,
+    );
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+});
+
 cartOpen?.addEventListener("click", openCart);
 document.querySelector("#cart-close")?.addEventListener("click", closeCart);
 cartBackdrop?.addEventListener("click", closeCart);
@@ -427,4 +553,5 @@ checkoutForm?.addEventListener("submit", (event) => {
   window.location.assign(whatsappUrl);
 });
 
+loadReviews();
 renderCart();
