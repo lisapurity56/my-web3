@@ -3,37 +3,37 @@ const PRODUCTS = {
     name: "Plain Yogourt",
     size: "35cl",
     price: 2500,
-    image: "image/plain yogourt.jpeg",
+    image: "image/Gemini_Generated_Image_i75vtmi75vtmi75v.jpeg",
   },
   coconut: {
     name: "Coconut Yogourt",
     size: "35cl",
     price: 1500,
-    image: "image/coconut yogourt.jpeg",
+    image: "image/Gemini_Generated_Image_pe4jo1pe4jo1pe4j.jpeg",
   },
   fruit: {
     name: "Fruit Yogourt",
     size: "35cl",
     price: 3000,
-    image: "image/Joliza Fruit Yogurt Freshness.jpeg",
+    image: "image/fruit yogourt.jpeg",
   },
   fura: {
     name: "Fura Yogourt",
     size: "35cl",
     price: 1800,
-    image: "image/fura yogourt.jpeg",
+    image: "image/Gemini_Generated_Image_m5ara7m5ara7m5ar.jpeg",
   },
   greek: {
     name: "Greek Yogourt",
     size: "350ml",
     price: 4000,
-    image: "image/greek yogourt.jpeg",
+    image: "image/Gemini_Generated_Image_ltn2vvltn2vvltn2.jpeg",
   },
   parfait: {
     name: "Parfait",
     size: "350ml",
     price: 5000,
-    image: "image/Joliza Berry Granola Parfait.jpeg",
+    image: "image/Joliza Yogourt Parfait with Fresh Berries.png",
   },
 };
 
@@ -334,8 +334,15 @@ async function loadReviews() {
     });
     if (response.status === 404) {
       const errorMessage = document.createElement("p");
-      errorMessage.className = "review-message review-message-error";
-      errorMessage.textContent = "Reviews aren't available on this static preview. Open the Render-hosted website to view and submit reviews.";
+      errorMessage.className = "review-message";
+      errorMessage.append(
+        document.createTextNode("Reviews aren't available on this static preview. "),
+      );
+      const liveSiteLink = document.createElement("a");
+      liveSiteLink.className = "review-preview-link";
+      liveSiteLink.href = "https://www.joliza-yogourt.com/#reviews";
+      liveSiteLink.textContent = "Open the live website to view and submit reviews.";
+      errorMessage.append(liveSiteLink);
       reviewList.replaceChildren(errorMessage);
       return;
     }
