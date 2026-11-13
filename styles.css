@@ -370,6 +370,15 @@ h2 { font-size: clamp(48px, 5vw, 70px); margin-bottom: 29px; }
   .site-header .brand-logo { width: 72px; height: 72px; flex-basis: 72px; }
 }
 
+@media (max-width: 760px) {
+  .cart-trigger { position: absolute; top: 15px; right: -10px; margin: 0; }
+  .menu-toggle { position: absolute; top: 62px; right: 0; }
+}
+
+@media (max-width: 520px) {
+  .menu-toggle { top: 54px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cart-panel { transition: none; }
   .rating-options label { transition: none; }
