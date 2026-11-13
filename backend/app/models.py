@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Integer, JSON, String, Text
 
 from backend.app.database import Base
 
@@ -13,4 +13,5 @@ class Inquiry(Base):
     name = Column(String(100), nullable=False)
     email = Column(String(254), nullable=False)
     message = Column(Text, nullable=False)
+    flavours = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

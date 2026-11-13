@@ -37,7 +37,6 @@ const PRODUCTS = {
   },
 };
 
-const WHATSAPP_LINK = "https://wa.me/2348064948591";
 const BUSINESS_EMAIL = "lisapurity56@gmail.com";
 const BULK_DISCOUNT_RATE = 0.05;
 const EVENT_DISCOUNT_RATE = 0.10;
@@ -45,12 +44,9 @@ const BULK_DISCOUNT_THRESHOLD = 10;
 const EVENT_DISCOUNT_THRESHOLD = 200;
 const PREORDER_NOTICE_DAYS = 2;
 const CART_STORAGE_KEY = "joliza-cart-v1";
-
-function whatsappMessageUrl(message) {
-  const url = new URL(WHATSAPP_LINK);
-  url.searchParams.set("text", message);
-  return url.toString();
-}
+const FLAVOURS = ["Vanilla", "Strawberry", "Banana", "Mango", "Coco", "Mixfruit"];
+const MAX_FLAVOUR_QUANTITY = 50;
+const API_BASE_URL = window.location.port === "5500" ? "http://127.0.0.1:8000" : "";
 
 const menuToggle = document.querySelector(".menu-toggle");
 const siteNav = document.querySelector(".site-nav");
@@ -75,13 +71,252 @@ const preorderDateField = document.querySelector("#preorder-date-field");
 const cartTotal = document.querySelector("#cart-total");
 const cartToast = document.querySelector("#cart-toast");
 const eventForm = document.querySelector("#event-form");
-const eventSummary = document.querySelector("#event-summary");
-const eventProduct = document.querySelector("#event-product");
-const eventQuantity = document.querySelector("#event-quantity");
+const eventFlavourFieldset = document.querySelector("#event-flavour-fieldset");
+const eventFlavourOptions = document.querySelector("#event-flavour-options");
+const eventFlavourSummary = document.querySelector("#event-flavour-summary");
+const eventFlavourError = document.querySelector("#event-flavour-error");
 const eventStatus = document.querySelector("#event-status");
 const reviewForm = document.querySelector("#review-form");
 const reviewStatus = document.querySelector("#review-status");
 const reviewList = document.querySelector("#review-list");
+
+function normaliseFlavourQuantity(value) {
+  const quantity = Number(value);
+  return Number.isFinite(quantity)
+    ? Math.max(0, Math.min(MAX_FLAVOUR_QUANTITY, Math.trunc(quantity)))
+    : 0;
+}
+
+function selectedEventFlavours() {
+  return [...(eventFlavourOptions?.querySelectorAll(".event-flavour-quantity") ?? [])]
+    .map((input) => ({
+      flavour: input.dataset.flavour,
+      quantity: normaliseFlavourQuantity(input.value),
+    }))
+    .filter(({ quantity }) => quantity > 0);
+}
+
+function updateEventFlavourSummary() {
+  const selected = selectedEventFlavours();
+  const total = selected.reduce((sum, item) => sum + item.quantity, 0);
+  for (const input of eventFlavourOptions?.querySelectorAll(".event-flavour-quantity") ?? []) {
+    const quantity = normaliseFlavourQuantity(input.value);
+    if (input.value && input.value !== String(quantity)) input.value = String(quantity);
+    input.closest(".event-flavour-row")?.classList.toggle("is-selected", quantity > 0);
+    const controls = input.closest(".event-flavour-controls");
+    const decrement = controls?.querySelector('[data-quantity-change="-1"]');
+    const increment = controls?.querySelector('[data-quantity-change="1"]');
+    if (decrement) decrement.disabled = quantity === 0;
+    if (increment) increment.disabled = quantity === MAX_FLAVOUR_QUANTITY;
+  }
+  if (eventFlavourSummary) {
+    eventFlavourSummary.textContent = total
+      ? `Selected: ${selected.map(({ flavour, quantity }) => `${quantity} ${flavour}`).join(", ")} (Total: ${total})`
+      : "No flavour selected";
+  }
+  if (total > 0) {
+    if (eventFlavourError) eventFlavourError.hidden = true;
+    eventFlavourFieldset?.removeAttribute("aria-invalid");
+  }
+}
+
+if (eventFlavourOptions) {
+  for (const flavour of FLAVOURS) {
+    const row = document.createElement("div");
+    row.className = "event-flavour-row";
+    const name = document.createElement("span");
+    name.className = "event-flavour-name";
+    name.textContent = flavour;
+
+    const controls = document.createElement("div");
+    controls.className = "event-flavour-controls";
+    const quantityButtons = [];
+    const quantity = document.createElement("input");
+    quantity.className = "event-flavour-quantity";
+    quantity.type = "number";
+    quantity.inputMode = "numeric";
+    quantity.min = "0";
+    quantity.max = String(MAX_FLAVOUR_QUANTITY);
+    quantity.step = "1";
+    quantity.value = "0";
+    quantity.dataset.flavour = flavour;
+    quantity.setAttribute("aria-label", `Quantity for ${flavour}`);
+    quantity.addEventListener("input", () => {
+      const normalised = String(normaliseFlavourQuantity(quantity.value));
+      if (quantity.value && quantity.value !== normalised) quantity.value = normalised;
+      updateEventFlavourSummary();
+    });
+    quantity.addEventListener("change", () => {
+      quantity.value = String(normaliseFlavourQuantity(quantity.value));
+      updateEventFlavourSummary();
+    });
+
+    for (const [change, symbol, label] of [
+      [-1, "-", `Decrease ${flavour} quantity`],
+      [1, "+", `Increase ${flavour} quantity`],
+    ]) {
+      const button = document.createElement("button");
+      button.className = "flavour-quantity-button";
+      button.type = "button";
+      button.textContent = symbol;
+      button.setAttribute("aria-label", label);
+      button.dataset.quantityChange = String(change);
+      button.addEventListener("click", () => {
+        quantity.value = String(normaliseFlavourQuantity(quantity.value) + change);
+        updateEventFlavourSummary();
+      });
+      quantityButtons.push(button);
+    }
+
+    controls.append(quantityButtons[0], quantity, quantityButtons[1]);
+    row.append(name, controls);
+    eventFlavourOptions.append(row);
+  }
+  updateEventFlavourSummary();
+}
+
+async function postInquiry(payload) {
+  console.log("Submitting inquiry to /api/inquiries", payload);
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/inquiries`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.error("Could not connect to the inquiry API.", error);
+    const url = `${API_BASE_URL || window.location.origin}/api/inquiries`;
+    const nextStep = API_BASE_URL
+      ? "Start the local backend with `python3 server.py` and retry."
+      : "Check that the API service is running and retry.";
+    throw new Error(`Cannot reach ${url}. ${nextStep}`);
+  }
+  const responseText = await response.text();
+  let result;
+  try {
+    result = JSON.parse(responseText);
+  } catch {
+    console.error("Inquiry API returned a non-JSON response.", response.status, responseText);
+    throw new Error(`The server returned an unexpected response (HTTP ${response.status}). Check the API URL and server.`);
+  }
+  console.log("Inquiry API response", response.status, result);
+  if (!response.ok) {
+    throw new Error(typeof result.error === "string" ? result.error : `The request failed (HTTP ${response.status}).`);
+  }
+  return result;
+}
+
+contactForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!contactForm.reportValidity()) return;
+
+  const submitButton = contactForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  if (formStatus) {
+    formStatus.hidden = true;
+    formStatus.classList.remove("error");
+  }
+
+  try {
+    const formData = new FormData(contactForm);
+    const result = await postInquiry({
+      inquiry_type: formData.get("inquiry_type"),
+      name: formData.get("name"),
+      email: formData.get("email"),
+      message: formData.get("message"),
+      website: formData.get("website"),
+      flavours: [],
+    });
+    if (formStatus) {
+      formStatus.hidden = false;
+      formStatus.textContent = result.message;
+    }
+    contactForm.reset();
+  } catch (error) {
+    console.error("Unable to submit inquiry.", error);
+    if (formStatus) {
+      formStatus.hidden = false;
+      formStatus.classList.add("error");
+      formStatus.textContent = error instanceof Error ? error.message : "Your message couldn't be sent. Please try again.";
+    }
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+});
+
+eventForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const flavours = selectedEventFlavours();
+  const totalFlavourQuantity = flavours.reduce((sum, item) => sum + item.quantity, 0);
+  if (totalFlavourQuantity < 1) {
+    if (eventFlavourError) eventFlavourError.hidden = false;
+    eventFlavourFieldset?.setAttribute("aria-invalid", "true");
+    eventFlavourOptions?.querySelector(".event-flavour-quantity")?.focus();
+    return;
+  }
+  if (eventFlavourError) eventFlavourError.hidden = true;
+  eventFlavourFieldset?.removeAttribute("aria-invalid");
+  if (!eventForm.reportValidity()) return;
+
+  const formData = new FormData(eventForm);
+  const eventDetails = {
+    name: formData.get("name"),
+    phone: formData.get("phone"),
+    event_type: formData.get("event_type"),
+    event_date: formData.get("event_date"),
+    location: formData.get("location"),
+    guests: Number(formData.get("guests")),
+    quantity: Number(formData.get("quantity")),
+    flavours,
+    note: formData.get("note"),
+  };
+  const message = [
+    `Phone: ${eventDetails.phone}`,
+    `Event type: ${eventDetails.event_type}`,
+    `Event date: ${eventDetails.event_date}`,
+    `Location: ${eventDetails.location}`,
+    `Number of guests: ${eventDetails.guests}`,
+    `Yogourt servings: ${eventDetails.quantity}`,
+    `Flavours: ${eventDetails.flavours.map(({ flavour, quantity }) => `${quantity} ${flavour}`).join(", ")}`,
+    eventDetails.note ? `Additional notes: ${eventDetails.note}` : "",
+  ].filter(Boolean).join("\n");
+  const payload = {
+    inquiry_type: "event",
+    ...eventDetails,
+    email: "",
+    message,
+  };
+  const submitButton = eventForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  if (eventStatus) {
+    eventStatus.hidden = true;
+    eventStatus.classList.remove("error", "success");
+  }
+
+  try {
+    const result = await postInquiry(payload);
+    if (eventStatus) {
+      eventStatus.hidden = false;
+      eventStatus.classList.add("success");
+      eventStatus.textContent = result.message;
+    }
+    eventForm.reset();
+    updateEventFlavourSummary();
+  } catch (error) {
+    console.error("Unable to submit event inquiry.", error);
+    if (eventStatus) {
+      eventStatus.hidden = false;
+      eventStatus.classList.add("error");
+      eventStatus.textContent = error instanceof Error ? error.message : "Your event enquiry couldn't be sent. Please try again.";
+    }
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+});
 
 function setNavigationOpen(isOpen) {
   if (!menuToggle || !siteNav) return;
@@ -554,7 +789,7 @@ document.querySelector("#preorder-start")?.addEventListener("click", () => {
   setOrderMode("preorder");
 });
 
-checkoutForm?.addEventListener("submit", (event) => {
+checkoutForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!checkoutForm.reportValidity()) return;
   const details = Object.fromEntries(new FormData(checkoutForm));
@@ -578,22 +813,55 @@ checkoutForm?.addEventListener("submit", (event) => {
   }
 
   const message = buildCartMessage(details, cartCalculations());
-  const whatsappUrl = whatsappMessageUrl(message);
-  cart = [];
-  persistCart();
-  renderCart();
-  checkoutForm.reset();
-  if (preorderDateField) preorderDateField.hidden = true;
-  checkoutForm.hidden = true;
-  if (cartCheckout) cartCheckout.hidden = false;
+  const items = cart.map(({ id, quantity }) => ({
+    product: PRODUCTS[id].name,
+    quantity,
+    unit_price: PRODUCTS[id].price,
+  }));
+  const payload = {
+    inquiry_type: orderMode,
+    name: details.name,
+    email: details.email,
+    phone: details.phone,
+    address: details.address,
+    delivery_date: details.delivery_date,
+    note: details.note,
+    items,
+    flavours: [],
+    message,
+  };
+  const submitButton = checkoutForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
   if (checkoutStatus) {
-    checkoutStatus.hidden = false;
+    checkoutStatus.hidden = true;
     checkoutStatus.classList.remove("success", "error");
-    checkoutStatus.classList.add("success");
-    checkoutStatus.textContent = "Thank you! We'll confirm on WhatsApp shortly.";
-    checkoutStatus.scrollIntoView({ block: "nearest" });
   }
-  window.location.assign(whatsappUrl);
+
+  try {
+    const result = await postInquiry(payload);
+    cart = [];
+    persistCart();
+    renderCart();
+    checkoutForm.reset();
+    if (preorderDateField) preorderDateField.hidden = true;
+    checkoutForm.hidden = true;
+    if (cartCheckout) cartCheckout.hidden = false;
+    if (checkoutStatus) {
+      checkoutStatus.hidden = false;
+      checkoutStatus.classList.add("success");
+      checkoutStatus.textContent = result.message;
+      checkoutStatus.scrollIntoView({ block: "nearest" });
+    }
+  } catch (error) {
+    console.error("Unable to submit cart order.", error);
+    if (checkoutStatus) {
+      checkoutStatus.hidden = false;
+      checkoutStatus.classList.add("error");
+      checkoutStatus.textContent = error instanceof Error ? error.message : "Your order couldn't be sent. Please try again.";
+    }
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
 });
 
 loadReviews();

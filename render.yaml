@@ -23,3 +23,15 @@ services:
         value: lisapurity56@gmail.com
       - key: JOLIZA_NOTIFY_EMAIL
         value: lisapurity56@gmail.com
+      - key: JOLIZA_WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: JOLIZA_WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: JOLIZA_WHATSAPP_TO
+        sync: false
+      - key: JOLIZA_WHATSAPP_TEMPLATE_NAME
+        sync: false
+      - key: JOLIZA_WHATSAPP_TEMPLATE_LANGUAGE
+        value: en_US
+      - key: JOLIZA_WHATSAPP_API_VERSION
+        value: v23.0

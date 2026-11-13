@@ -8,6 +8,7 @@ from backend.app.email_notifications import (
 )
 from backend.app.models import Inquiry
 from backend.app.schemas import InquiryCreate
+from backend.app.whatsapp_notifications import send_whatsapp_notification
 
 router = APIRouter(prefix="/api/inquiries", tags=["inquiries"])
 
@@ -22,6 +23,7 @@ def create_inquiry(payload: InquiryCreate, db: Session = Depends(get_db)):
         name=payload.name,
         email=payload.email,
         message=payload.message,
+        flavours=[item.model_dump() for item in payload.flavours],
     )
     db.add(inquiry)
     db.commit()
@@ -39,12 +41,25 @@ def create_inquiry(payload: InquiryCreate, db: Session = Depends(get_db)):
         log_notification_failure(error)
         notification_sent = False
 
+    try:
+        whatsapp_notification_sent = send_whatsapp_notification(
+            inquiry.id,
+            inquiry.inquiry_type,
+            inquiry.name,
+            inquiry.email,
+            inquiry.message,
+        )
+    except Exception as error:
+        log_notification_failure(error)
+        whatsapp_notification_sent = False
+
     return {
         "id": inquiry.id,
         "message": (
             "Thanks for getting in touch. We'll be in contact soon."
-            if notification_sent
-            else "Your inquiry was saved, but email notifications are unavailable right now."
+            if notification_sent or whatsapp_notification_sent
+            else "Your inquiry was saved, but email and WhatsApp notifications are unavailable right now."
         ),
         "notification_sent": notification_sent,
+        "whatsapp_notification_sent": whatsapp_notification_sent,
     }

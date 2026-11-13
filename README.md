@@ -92,6 +92,31 @@ app password was exposed or revoked, revoke it and create a replacement, then
 update `.env` and restart the server. Gmail SMTP authentication cannot be fixed
 by retrying with different TLS settings when using port `465`.
 
+## Enable WhatsApp notifications
+
+The backend can send each saved inquiry to your WhatsApp using Meta's WhatsApp
+Cloud API. This requires a WhatsApp Business Platform account, an access token,
+the sending phone number ID, and an approved message template with one body
+text variable (for example, `{{1}}`). The template is required for business-
+initiated notifications.
+
+Set these variables in the Render service's **Environment** settings or in the
+local `.env` file:
+
+```sh
+JOLIZA_WHATSAPP_ACCESS_TOKEN=your-meta-access-token
+JOLIZA_WHATSAPP_PHONE_NUMBER_ID=your-business-phone-number-id
+JOLIZA_WHATSAPP_TO=your-recipient-number-with-country-code
+JOLIZA_WHATSAPP_TEMPLATE_NAME=inquiry_notification
+JOLIZA_WHATSAPP_TEMPLATE_LANGUAGE=en_US
+JOLIZA_WHATSAPP_API_VERSION=v23.0
+```
+
+Use the recipient's international phone number (for example, `+15551234567`).
+Keep the access token private; do not commit it to the repository. If these
+settings are absent, inquiries continue to be saved and emailed as before.
+WhatsApp delivery failures do not discard inquiries or prevent email delivery.
+
 ## View submitted inquiries
 
 Stop the server and run:
@@ -114,9 +139,16 @@ python3 -m unittest discover -s tests -v
 
 - `GET /api/health` — health check.
 - `POST /api/inquiries` — accepts JSON with `inquiry_type` (`general`, `order`,
-  or `stockist`), `name`, `email`, `message`, and an optional `website`
-  honeypot field. Successful submissions return `201`; invalid submissions
-  return a descriptive `4xx` response.
+  `preorder`, `event`, or `stockist`), `name`, `email`, `message`, and an optional
+  `website` honeypot field. Event inquiries also require a non-empty `flavours`
+  array of `{flavour, quantity}` objects. Allowed flavours are Vanilla,
+  Strawberry, Banana, Mango, Coco, and Mixfruit; each quantity must be 1–50.
+  Successful submissions return `201`; invalid submissions return a
+  descriptive `4xx` response.
+
+When using Live Server on port `5500`, start the API with `python3 server.py`.
+The website automatically sends form requests to `http://127.0.0.1:8000` and
+the API allows requests from Live Server's `localhost` and `127.0.0.1` origins.
 
 For a custom domain, configure it in the Render service's **Settings → Custom
 Domains** and follow Render's DNS instructions. Review the persistent disk's

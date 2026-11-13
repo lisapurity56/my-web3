@@ -15,6 +15,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from backend.app.whatsapp_notifications import send_whatsapp_notification
+
 
 ROOT = Path(__file__).resolve().parent
 
@@ -59,7 +61,10 @@ RATE_LIMIT_COUNT = 5
 RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 SMTP_TIMEOUT_SECONDS = 10
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-ALLOWED_INQUIRY_TYPES = {"general", "order", "stockist"}
+ALLOWED_INQUIRY_TYPES = {"general", "order", "preorder", "event", "stockist"}
+ALLOWED_FLAVOURS = {"Vanilla", "Strawberry", "Banana", "Mango", "Coco", "Mixfruit"}
+MAX_FLAVOUR_QUANTITY = 50
+ALLOWED_CORS_ORIGINS = {"http://localhost:5500", "http://127.0.0.1:5500"}
 STATIC_FILES = {
     "index.html",
     "script.js",
@@ -157,10 +162,18 @@ def connect_database():
             name TEXT NOT NULL,
             email TEXT NOT NULL,
             message TEXT NOT NULL,
+            flavours TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
+    inquiry_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(inquiries)").fetchall()
+    }
+    if "flavours" not in inquiry_columns:
+        connection.execute(
+            "ALTER TABLE inquiries ADD COLUMN flavours TEXT NOT NULL DEFAULT '[]'"
+        )
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS reviews (
@@ -189,6 +202,10 @@ def send_json(handler, status, payload, head_only=False):
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("X-Content-Type-Options", "nosniff")
+    origin = handler.headers.get("Origin")
+    if origin in ALLOWED_CORS_ORIGINS:
+        handler.send_header("Access-Control-Allow-Origin", origin)
+        handler.send_header("Vary", "Origin")
     handler.end_headers()
     if not head_only:
         handler.wfile.write(body)
@@ -338,6 +355,20 @@ class JolizaHandler(SimpleHTTPRequestHandler):
 
         super().do_HEAD()
 
+    def do_OPTIONS(self):
+        if urlsplit(self.path).path not in {"/api/inquiries", "/api/reviews"}:
+            send_json(self, 404, {"error": "Not found."})
+            return
+        self.send_response(204)
+        origin = self.headers.get("Origin")
+        if origin in ALLOWED_CORS_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Accept, Content-Type")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.end_headers()
+
     def do_POST(self):
         path = urlsplit(self.path).path
         if path == "/api/reviews":
@@ -392,7 +423,12 @@ class JolizaHandler(SimpleHTTPRequestHandler):
         name = payload.get("name")
         email = payload.get("email")
         message = payload.get("message")
-        if not all(isinstance(value, str) for value in (inquiry_type, name, email, message)):
+        flavours = payload.get("flavours", [])
+        if (
+            not all(isinstance(value, str) for value in (inquiry_type, name, email, message))
+            or not isinstance(flavours, list)
+            or any(not isinstance(value, dict) for value in flavours)
+        ):
             send_json(self, 400, {"error": "Invalid form data."})
             return
 
@@ -400,15 +436,41 @@ class JolizaHandler(SimpleHTTPRequestHandler):
         name = name.strip()
         email = email.strip()
         message = message.strip()
+        normalised_flavours = []
+        for item in flavours:
+            flavour = item.get("flavour")
+            quantity = item.get("quantity")
+            if not isinstance(flavour, str) or type(quantity) is not int:
+                send_json(self, 400, {"error": "Each flavour needs a name and whole-number quantity."})
+                return
+            flavour = flavour.strip()
+            if flavour not in ALLOWED_FLAVOURS:
+                send_json(self, 400, {"error": "Choose only flavours from the available list."})
+                return
+            if not 1 <= quantity <= MAX_FLAVOUR_QUANTITY:
+                send_json(self, 400, {"error": f"Each flavour quantity must be from 1 to {MAX_FLAVOUR_QUANTITY}."})
+                return
+            normalised_flavours.append({"flavour": flavour, "quantity": quantity})
+        flavours = normalised_flavours
 
         if inquiry_type not in ALLOWED_INQUIRY_TYPES:
             send_json(self, 400, {"error": "Choose a valid reason for getting in touch."})
             return
+        flavour_names = [item["flavour"] for item in flavours]
+        if len(set(flavour_names)) != len(flavour_names):
+            send_json(self, 400, {"error": "Each flavour can appear only once."})
+            return
+        if inquiry_type == "event" and not flavours:
+            send_json(self, 400, {"error": "Choose at least one flavour for an event inquiry."})
+            return
         if not name or len(name) > 100:
             send_json(self, 400, {"error": "Enter your name (up to 100 characters)."})
             return
-        if len(email) > 254 or not EMAIL_PATTERN.fullmatch(email):
+        if len(email) > 254 or (email and not EMAIL_PATTERN.fullmatch(email)):
             send_json(self, 400, {"error": "Enter a valid email address."})
+            return
+        if not email and inquiry_type in {"general", "stockist"}:
+            send_json(self, 400, {"error": "Email is required for general and stockist inquiries."})
             return
         if not message or len(message) > 5000:
             send_json(self, 400, {"error": "Enter a message (up to 5,000 characters)."})
@@ -418,10 +480,10 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             with connect_database() as connection:
                 cursor = connection.execute(
                     """
-                    INSERT INTO inquiries (inquiry_type, name, email, message)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO inquiries (inquiry_type, name, email, message, flavours)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (inquiry_type, name, email, message),
+                    (inquiry_type, name, email, message, json.dumps(flavours)),
                 )
                 inquiry_id = cursor.lastrowid
         except sqlite3.Error:
@@ -450,10 +512,21 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             self.log_error("Failed to send inquiry notification: %r", error)
             notification_sent = False
 
+        try:
+            whatsapp_notification_sent = send_whatsapp_notification(
+                inquiry_id, inquiry_type, name, email, message
+            )
+        except Exception as error:
+            self.log_error(
+                "Failed to send WhatsApp inquiry notification (%s)",
+                type(error).__name__,
+            )
+            whatsapp_notification_sent = False
+
         response_message = (
             "Thanks for getting in touch. We'll be in contact soon."
-            if notification_sent
-            else "Your inquiry was saved, but email notifications are unavailable right now."
+            if notification_sent or whatsapp_notification_sent
+            else "Your inquiry was saved, but email and WhatsApp notifications are unavailable right now."
         )
         send_json(
             self,
@@ -462,6 +535,7 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                 "id": inquiry_id,
                 "message": response_message,
                 "notification_sent": notification_sent,
+                "whatsapp_notification_sent": whatsapp_notification_sent,
             },
         )
 

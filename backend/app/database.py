@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -41,3 +41,8 @@ def init_db():
     from backend.app.models import Inquiry  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    if "flavours" not in {column["name"] for column in inspect(engine).get_columns("inquiries")}:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE inquiries ADD COLUMN flavours JSON NOT NULL DEFAULT '[]'")
+            )

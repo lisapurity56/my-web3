@@ -81,6 +81,11 @@ class InquiryApiTests(unittest.TestCase):
                     "inquiry_type": inquiry_type,
                     "email": "",
                 }
+                if inquiry_type == "event":
+                    payload["flavours"] = [
+                        {"flavour": "Vanilla", "quantity": 3},
+                        {"flavour": "Strawberry", "quantity": 5},
+                    ]
                 with patch.dict(
                     "os.environ",
                     {
@@ -99,6 +104,14 @@ class InquiryApiTests(unittest.TestCase):
                     inquiry = db.query(Inquiry).one()
                     self.assertEqual(inquiry.inquiry_type, inquiry_type)
                     self.assertEqual(inquiry.email, "")
+                    if inquiry_type == "event":
+                        self.assertEqual(
+                            inquiry.flavours,
+                            [
+                                {"flavour": "Vanilla", "quantity": 3},
+                                {"flavour": "Strawberry", "quantity": 5},
+                            ],
+                        )
                     db.delete(inquiry)
                     db.commit()
 
@@ -117,6 +130,10 @@ class InquiryApiTests(unittest.TestCase):
             **self.inquiry_payload(),
             "inquiry_type": "event",
             "email": "",
+            "flavours": [
+                {"flavour": "Mango", "quantity": 2},
+                {"flavour": "Coco", "quantity": 1},
+            ],
         }
         with (
             patch.dict("os.environ", env),
@@ -130,6 +147,33 @@ class InquiryApiTests(unittest.TestCase):
         self.assertTrue(response.json()["notification_sent"])
         notification = smtp.send_message.call_args.args[0]
         self.assertIsNone(notification.get("Reply-To"))
+
+    def test_whatsapp_notification_success_is_reported_independently_of_email(self):
+        with (
+            patch(
+                "backend.app.routers.inquiries.send_inquiry_notification",
+                return_value=False,
+            ),
+            patch(
+                "backend.app.routers.inquiries.send_whatsapp_notification",
+                return_value=True,
+            ) as send_whatsapp,
+        ):
+            response = self.client.post(
+                "/api/inquiries", json=self.inquiry_payload()
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.json()["notification_sent"])
+        self.assertTrue(response.json()["whatsapp_notification_sent"])
+        self.assertIn("contact soon", response.json()["message"])
+        send_whatsapp.assert_called_once_with(
+            1,
+            "order",
+            "Test Buyer",
+            "buyer@example.com",
+            "I would like to place an order.",
+        )
 
     def test_inquiry_notification_uses_starttls(self):
         smtp = MagicMock()
@@ -227,6 +271,11 @@ class InquiryApiTests(unittest.TestCase):
             {"email": "not-an-email"},
             {"email": "", "inquiry_type": "general"},
             {"message": ""},
+            {"inquiry_type": "event", "flavours": []},
+            {"inquiry_type": "event", "flavours": [{"flavour": "Chocolate", "quantity": 1}]},
+            {"inquiry_type": "event", "flavours": [{"flavour": "Vanilla", "quantity": 0}]},
+            {"inquiry_type": "event", "flavours": [{"flavour": "Vanilla", "quantity": 51}]},
+            {"inquiry_type": "event", "flavours": [{"flavour": "Vanilla", "quantity": 1.5}]},
         )
         for invalid_fields in invalid_payloads:
             with self.subTest(invalid_fields=invalid_fields):

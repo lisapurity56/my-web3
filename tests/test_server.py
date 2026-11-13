@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import smtplib
 import tempfile
 import threading
@@ -126,6 +127,93 @@ class BackendTests(unittest.TestCase):
             row = connection.execute("SELECT name, email, message FROM inquiries").fetchone()
         self.assertEqual(row, ("Test Person", "person@example.com", "Hello Joliza"))
 
+    def test_event_inquiry_requires_and_saves_flavours(self):
+        payload = {
+            "inquiry_type": "event",
+            "name": "Event Buyer",
+            "email": "",
+            "message": "A party order",
+            "flavours": [
+                {"flavour": "Vanilla", "quantity": 3},
+                {"flavour": "Strawberry", "quantity": 5},
+            ],
+        }
+        with patch.object(server, "send_inquiry_notification", return_value=False):
+            status, _ = self.submit_inquiry(**payload)
+
+        self.assertEqual(status, 201)
+        with server.connect_database() as connection:
+            row = connection.execute(
+                "SELECT flavours FROM inquiries WHERE inquiry_type = 'event'"
+            ).fetchone()
+        self.assertEqual(json.loads(row[0]), payload["flavours"])
+
+    def test_preorder_request_is_accepted_without_event_flavours(self):
+        with patch.object(server, "send_inquiry_notification", return_value=False):
+            status, _ = self.submit_inquiry(
+                inquiry_type="preorder",
+                email="",
+                flavours=[],
+            )
+
+        self.assertEqual(status, 201)
+
+    def test_event_inquiry_rejects_empty_or_unknown_flavours(self):
+        invalid_flavours = (
+            [],
+            [{"flavour": "Unknown", "quantity": 1}],
+            [{"flavour": "Vanilla", "quantity": 0}],
+            [{"flavour": "Vanilla", "quantity": 51}],
+            [{"flavour": "Vanilla", "quantity": 1.5}],
+        )
+        for flavours in invalid_flavours:
+            with self.subTest(flavours=flavours):
+                status, payload = self.submit_inquiry(
+                    inquiry_type="event",
+                    email="",
+                    flavours=flavours,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("flavour", payload["error"].lower())
+
+    def test_existing_database_gets_flavours_column(self):
+        legacy_path = self.db_path.parent / "legacy.sqlite3"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE inquiries (
+                    id INTEGER PRIMARY KEY,
+                    inquiry_type TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+        with patch.object(server, "DB_PATH", legacy_path):
+            server.connect_database().close()
+
+        with sqlite3.connect(legacy_path) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(inquiries)")}
+        self.assertIn("flavours", columns)
+
+    def test_live_server_preflight_allows_localhost_5500(self):
+        request = urllib.request.Request(
+            self.base_url + "/api/inquiries",
+            headers={
+                "Origin": "http://localhost:5500",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+            method="OPTIONS",
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            self.assertEqual(response.status, 204)
+            self.assertEqual(response.headers["Access-Control-Allow-Origin"], "http://localhost:5500")
+            self.assertIn("POST", response.headers["Access-Control-Allow-Methods"])
+
     def test_mail_failure_does_not_lose_saved_inquiry(self):
         with patch.object(
             server, "send_inquiry_notification", side_effect=smtplib.SMTPException("failed")
@@ -163,6 +251,38 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertTrue(payload["notification_sent"])
         self.assertIn("contact soon", payload["message"])
+
+    def test_whatsapp_success_is_reported_to_the_form(self):
+        with (
+            patch.object(server, "send_inquiry_notification", return_value=False),
+            patch.object(server, "send_whatsapp_notification", return_value=True),
+        ):
+            status, payload = self.submit_inquiry()
+
+        self.assertEqual(status, 201)
+        self.assertFalse(payload["notification_sent"])
+        self.assertTrue(payload["whatsapp_notification_sent"])
+        self.assertIn("contact soon", payload["message"])
+
+    def test_whatsapp_failure_does_not_block_email_or_saved_inquiry(self):
+        with (
+            patch.object(server, "send_inquiry_notification", return_value=True),
+            patch.object(
+                server,
+                "send_whatsapp_notification",
+                side_effect=OSError("WhatsApp API unavailable"),
+            ),
+        ):
+            status, payload = self.submit_inquiry()
+
+        self.assertEqual(status, 201)
+        self.assertTrue(payload["notification_sent"])
+        self.assertFalse(payload["whatsapp_notification_sent"])
+        with server.connect_database() as connection:
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM inquiries").fetchone()[0],
+                1,
+            )
 
     def test_honeypot_submission_is_not_stored_or_emailed(self):
         with patch.object(server, "send_inquiry_notification") as send_email:
