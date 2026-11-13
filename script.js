@@ -317,6 +317,42 @@ function buildCartMessage(details, calculations) {
   return lines.join("\n");
 }
 
+eventForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!eventForm.reportValidity()) return;
+
+  const details = Object.fromEntries(new FormData(eventForm));
+  const lines = [
+    "JOLIZA EVENT ENQUIRY",
+    `Name: ${details.name}`,
+    `Phone: ${details.phone}`,
+    `Event type: ${details.event_type}`,
+    `Event date: ${details.event_date}`,
+    `Location: ${details.location}`,
+    `Number of guests: ${details.guests}`,
+    `Yogourt servings: ${details.quantity}`,
+    `Yogourt flavour: ${details.product}`,
+  ];
+  if (details.note) lines.push(`Anything else: ${details.note}`);
+
+  const whatsappUrl = whatsappMessageUrl(lines.join("\n"));
+  if (eventStatus) {
+    eventStatus.hidden = false;
+    eventStatus.classList.remove("error");
+    eventStatus.classList.add("success");
+    eventStatus.replaceChildren(
+      document.createTextNode("WhatsApp should open with your booking details. If it doesn't, "),
+    );
+    const whatsappLink = document.createElement("a");
+    whatsappLink.href = whatsappUrl;
+    whatsappLink.target = "_blank";
+    whatsappLink.rel = "noopener noreferrer";
+    whatsappLink.textContent = "open WhatsApp";
+    eventStatus.append(whatsappLink, document.createTextNode(" and tap Send to complete your enquiry."));
+  }
+  window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+});
+
 function showReviewStatus(message, isError = false) {
   if (!reviewStatus) return;
   reviewStatus.hidden = false;
