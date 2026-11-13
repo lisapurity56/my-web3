@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hmac
 import json
 import os
 import re
@@ -208,10 +209,75 @@ class JolizaHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def send_admin_json(self, status, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", os.environ.get("ADMIN_ORIGIN", "*"))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         path = urlsplit(self.path).path
         if path == "/api/health":
             send_json(self, 200, {"status": "ok"})
+            return
+
+        if path == "/api/admin/inquiries":
+            admin_token = os.environ.get("ADMIN_TOKEN")
+            authorization = self.headers.get("Authorization", "")
+            if not admin_token or not hmac.compare_digest(
+                authorization, f"Bearer {admin_token}"
+            ):
+                self.send_admin_json(401, {"error": "Unauthorized."})
+                return
+
+            try:
+                if DB_PATH.exists():
+                    connection = sqlite3.connect(
+                        f"{DB_PATH.as_uri()}?mode=ro", uri=True, timeout=10
+                    )
+                    try:
+                        rows = connection.execute(
+                            """
+                            SELECT id, created_at, inquiry_type, name, email, message
+                            FROM inquiries
+                            ORDER BY created_at DESC, id DESC
+                            """
+                        ).fetchall()
+                    finally:
+                        connection.close()
+                else:
+                    rows = []
+            except (sqlite3.Error, OSError):
+                if not DB_PATH.exists():
+                    rows = []
+                else:
+                    self.log_error("Failed to load admin inquiries")
+                    self.send_admin_json(
+                        500, {"error": "Inquiries couldn't be loaded."}
+                    )
+                    return
+
+            self.send_admin_json(
+                200,
+                {
+                    "inquiries": [
+                        {
+                            "id": inquiry_id,
+                            "created_at": created_at,
+                            "type": inquiry_type,
+                            "name": name,
+                            "email": email,
+                            "message": message,
+                        }
+                        for inquiry_id, created_at, inquiry_type, name, email, message in rows
+                    ]
+                },
+            )
             return
 
         if path == "/api/reviews":
@@ -245,6 +311,20 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             return
 
         super().do_GET()
+
+    def do_OPTIONS(self):
+        path = urlsplit(self.path).path
+        if path != "/api/admin/inquiries":
+            send_json(self, 404, {"error": "Not found."})
+            return
+
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", os.environ.get("ADMIN_ORIGIN", "*"))
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Authorization")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_HEAD(self):
         path = urlsplit(self.path).path
