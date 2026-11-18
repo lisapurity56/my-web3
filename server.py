@@ -65,15 +65,38 @@ ALLOWED_INQUIRY_TYPES = {"general", "order", "preorder", "event", "stockist"}
 ALLOWED_FLAVOURS = {"Vanilla", "Strawberry", "Banana", "Mango", "Coco", "Mixfruit"}
 MAX_FLAVOUR_QUANTITY = 50
 ALLOWED_CORS_ORIGINS = {"http://localhost:5500", "http://127.0.0.1:5500"}
+CHAT_SITE_ORIGIN = os.environ.get("CHAT_SITE_ORIGIN", "").rstrip("/")
+if CHAT_SITE_ORIGIN:
+    ALLOWED_CORS_ORIGINS.add(CHAT_SITE_ORIGIN)
+CHAT_RATE_LIMIT_COUNT = 20
+CHAT_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
+CHAT_MAX_MESSAGES = 6
+CHAT_MAX_MESSAGE_LENGTH = 500
+CHAT_SYSTEM_PROMPT = (
+    "You represent Joliza Yogourt, a homemade yogourt business based in Karu, Abuja. "
+    "Answer only questions about the business and use only these facts: products include "
+    "Plain, Coconut, Fruit, Fura, and Greek Yogourt, plus Parfait; current cart prices are "
+    "Plain ₦2,500, Coconut ₦1,500, Fruit ₦3,000, Fura ₦1,800, Greek ₦4,000, and "
+    "Parfait ₦5,000; pre-orders need at least two days' notice; customers can contact "
+    "08064948591 or lisapurity56@gmail.com; opening hours are Monday to Saturday, "
+    "9am to 5pm. Do not invent facts or provide or infer payment or account details. "
+    "For payment questions, say: Please tap the Payment button for our account details. "
+    "If unsure, say you do not know and direct the customer to our contact form or "
+    "WhatsApp at 08064948591. Keep replies short and friendly."
+)
 STATIC_FILES = {
     "index.html",
     "script.js",
     "styles.css",
+    "chat.css",
+    "chat.js",
+    "faq.json",
     "joliza-logo.png",
     "joliza flyer.png",
 }
 recent_submissions = defaultdict(deque)
 recent_review_submissions = defaultdict(deque)
+recent_chat_requests = defaultdict(deque)
 
 
 @dataclass(frozen=True)
@@ -222,6 +245,52 @@ def is_static_asset(path):
     )
 
 
+class ChatProviderUnavailable(Exception):
+    pass
+
+
+class ChatProviderError(Exception):
+    pass
+
+
+def is_payment_question(messages):
+    payment_pattern = re.compile(
+        r"\b(pay\w*|payment|account|transfer|opay|bank)\b", re.IGNORECASE
+    )
+    return any(
+        message["role"] == "user" and payment_pattern.search(message["content"])
+        for message in messages
+    )
+
+
+def get_chat_reply(messages):
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        raise ChatProviderUnavailable
+
+    try:
+        from anthropic import APIError, Anthropic
+    except ImportError as error:
+        raise ChatProviderUnavailable from error
+
+    try:
+        response = Anthropic(api_key=api_key).messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=128,
+            system=CHAT_SYSTEM_PROMPT,
+            messages=messages,
+        )
+    except APIError as error:
+        raise ChatProviderError from error
+
+    reply = "\n".join(
+        block.text for block in response.content if getattr(block, "type", None) == "text"
+    ).strip()
+    if not reply:
+        raise ChatProviderError
+    return reply
+
+
 class JolizaHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -356,7 +425,7 @@ class JolizaHandler(SimpleHTTPRequestHandler):
         super().do_HEAD()
 
     def do_OPTIONS(self):
-        if urlsplit(self.path).path not in {"/api/inquiries", "/api/reviews"}:
+        if urlsplit(self.path).path not in {"/api/inquiries", "/api/reviews", "/api/chat"}:
             send_json(self, 404, {"error": "Not found."})
             return
         self.send_response(204)
@@ -371,6 +440,9 @@ class JolizaHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlsplit(self.path).path
+        if path == "/api/chat":
+            self.chat()
+            return
         if path == "/api/reviews":
             self.create_review()
             return
@@ -619,6 +691,73 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             201,
             {"message": "Thanks for sharing your review. It will appear after moderation."},
         )
+
+    def chat(self):
+        if self.headers.get_content_type() != "application/json":
+            send_json(self, 415, {"error": "Send the conversation as JSON."})
+            return
+
+        try:
+            body_length = int(self.headers.get("Content-Length", ""))
+        except (TypeError, ValueError):
+            send_json(self, 400, {"error": "Invalid request body."})
+            return
+        if body_length < 1 or body_length > MAX_BODY_BYTES:
+            send_json(self, 413, {"error": "The conversation is too large."})
+            return
+
+        try:
+            messages = json.loads(self.rfile.read(body_length))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            send_json(self, 400, {"error": "Invalid JSON."})
+            return
+        if (
+            not isinstance(messages, list)
+            or not messages
+            or len(messages) > CHAT_MAX_MESSAGES
+            or any(
+                not isinstance(message, dict)
+                or set(message) != {"role", "content"}
+                or not isinstance(message["role"], str)
+                or message["role"] not in {"user", "assistant"}
+                or not isinstance(message["content"], str)
+                or not message["content"].strip()
+                or len(message["content"]) > CHAT_MAX_MESSAGE_LENGTH
+                for message in messages
+            )
+            or messages[-1]["role"] != "user"
+        ):
+            send_json(
+                self,
+                400,
+                {"error": "Provide up to 6 non-empty messages of 500 characters or fewer."},
+            )
+            return
+
+        now = time.monotonic()
+        client_key = self.client_address[0]
+        requests = recent_chat_requests[client_key]
+        while requests and now - requests[0] >= CHAT_RATE_LIMIT_WINDOW_SECONDS:
+            requests.popleft()
+        if len(requests) >= CHAT_RATE_LIMIT_COUNT:
+            send_json(self, 429, {"error": "Too many chat requests. Please try again later."})
+            return
+        requests.append(now)
+
+        if is_payment_question(messages):
+            send_json(self, 200, {"reply": "Please tap the Payment button for our account details."})
+            return
+
+        try:
+            reply = get_chat_reply(messages)
+        except ChatProviderUnavailable:
+            send_json(self, 503, {"error": "Chat is temporarily unavailable."})
+            return
+        except ChatProviderError:
+            self.log_error("Anthropic chat request failed")
+            send_json(self, 502, {"error": "Chat is temporarily unavailable."})
+            return
+        send_json(self, 200, {"reply": reply})
 
     def log_message(self, format, *args):
         # Keep form contents and email addresses out of request logs.

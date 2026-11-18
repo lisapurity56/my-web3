@@ -1,0 +1,251 @@
+/* Floating launcher and responsive chat panel. */
+.chat-widget {
+  position: fixed;
+  right: max(1.25rem, env(safe-area-inset-right));
+  bottom: max(1.25rem, env(safe-area-inset-bottom));
+  z-index: 1000;
+  font-family: "DM Sans", sans-serif;
+}
+
+.chat-launcher,
+.chat-close,
+.chat-form button,
+.chat-quick-replies button,
+.chat-copy-button {
+  font: inherit;
+}
+
+.chat-launcher {
+  min-width: 4.25rem;
+  min-height: 4.25rem;
+  border: 0;
+  border-radius: 50%;
+  background: #003b19;
+  color: #fff;
+  box-shadow: 0 0.4rem 1.4rem #003b1940;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.chat-launcher:focus-visible,
+.chat-close:focus-visible,
+.chat-form :focus-visible,
+.chat-quick-replies button:focus-visible,
+.chat-copy-button:focus-visible {
+  outline: 3px solid #d39245;
+  outline-offset: 3px;
+}
+
+.chat-panel {
+  position: absolute;
+  right: 0;
+  bottom: 5.25rem;
+  display: flex;
+  width: min(23rem, calc(100vw - 2rem));
+  height: min(34rem, calc(100dvh - 7rem));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #d6dfd4;
+  border-radius: 1.1rem;
+  background: #fffefa;
+  box-shadow: 0 1rem 3rem #14291d36;
+  color: #17241b;
+}
+
+.chat-panel[hidden] {
+  display: none;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  background: #003b19;
+  color: #fff;
+}
+
+.chat-header h2,
+.chat-header p {
+  margin: 0;
+}
+
+.chat-header h2 {
+  font-size: 1rem;
+}
+
+.chat-header p {
+  margin-top: 0.2rem;
+  color: #e3eee5;
+  font-size: 0.8rem;
+}
+
+.chat-close {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.chat-close:hover {
+  background: #ffffff20;
+}
+
+.chat-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.7rem;
+  overflow-y: auto;
+  padding: 1rem;
+  overscroll-behavior: contain;
+}
+
+.chat-message {
+  max-width: 88%;
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.9rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.bot-message {
+  align-self: flex-start;
+  border: 1px solid #e1e8df;
+  border-bottom-left-radius: 0.25rem;
+  background: #f0f5ee;
+  color: #17241b;
+}
+
+.user-message {
+  align-self: flex-end;
+  border-bottom-right-radius: 0.25rem;
+  background: #174f2d;
+  color: #fff;
+}
+
+.chat-typing {
+  color: #44554a;
+  font-style: italic;
+}
+
+.chat-copy-button {
+  display: block;
+  margin-top: 0.65rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #174f2d;
+  border-radius: 0.45rem;
+  background: #fff;
+  color: #123d22;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.chat-copy-status {
+  display: block;
+  min-height: 1rem;
+  margin-top: 0.25rem;
+  color: #174f2d;
+  font-size: 0.75rem;
+}
+
+.chat-quick-replies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0 1rem 0.8rem;
+}
+
+.chat-quick-replies[hidden] {
+  display: none;
+}
+
+.chat-quick-replies button {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #174f2d;
+  border-radius: 999px;
+  background: #fff;
+  color: #123d22;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.chat-quick-replies button:hover,
+.chat-copy-button:hover {
+  background: #eaf2e8;
+}
+
+.chat-form {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.8rem;
+  border-top: 1px solid #e1e8df;
+}
+
+.chat-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid #aebdaf;
+  border-radius: 0.55rem;
+  background: #fff;
+  color: #17241b;
+  font: inherit;
+}
+
+.chat-form button {
+  padding: 0.65rem 0.85rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: #003b19;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.chat-form button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+@media (max-width: 480px) {
+  .chat-widget {
+    right: max(0.75rem, env(safe-area-inset-right));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .chat-panel {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .chat-launcher {
+    min-width: 3.75rem;
+    min-height: 3.75rem;
+  }
+}

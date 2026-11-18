@@ -38,6 +38,7 @@ const PRODUCTS = {
 };
 
 const BUSINESS_EMAIL = "lisapurity56@gmail.com";
+const WHATSAPP_PHONE_NUMBER = "2348064948591";
 const BULK_DISCOUNT_RATE = 0.05;
 const EVENT_DISCOUNT_RATE = 0.10;
 const BULK_DISCOUNT_THRESHOLD = 10;
@@ -85,6 +86,10 @@ function normaliseFlavourQuantity(value) {
   return Number.isFinite(quantity)
     ? Math.max(0, Math.min(MAX_FLAVOUR_QUANTITY, Math.trunc(quantity)))
     : 0;
+}
+
+function whatsappMessageUrl(message) {
+  return `https://wa.me/${WHATSAPP_PHONE_NUMBER}?text=${encodeURIComponent(message)}`;
 }
 
 function selectedEventFlavours() {
@@ -830,12 +835,24 @@ checkoutForm?.addEventListener("submit", async (event) => {
     flavours: [],
     message,
   };
+  const whatsappUrl = whatsappMessageUrl(message);
   const submitButton = checkoutForm.querySelector('button[type="submit"]');
   if (submitButton) submitButton.disabled = true;
   if (checkoutStatus) {
     checkoutStatus.hidden = true;
     checkoutStatus.classList.remove("success", "error");
+    checkoutStatus.replaceChildren(
+      document.createTextNode("Opening WhatsApp with your order details. If it doesn't open, "),
+    );
+    const whatsappLink = document.createElement("a");
+    whatsappLink.href = whatsappUrl;
+    whatsappLink.target = "_blank";
+    whatsappLink.rel = "noopener noreferrer";
+    whatsappLink.textContent = "open WhatsApp";
+    checkoutStatus.append(whatsappLink, document.createTextNode(" and tap Send."));
+    checkoutStatus.hidden = false;
   }
+  window.open(whatsappUrl, "_blank", "noopener,noreferrer");
 
   try {
     const result = await postInquiry(payload);
@@ -849,7 +866,15 @@ checkoutForm?.addEventListener("submit", async (event) => {
     if (checkoutStatus) {
       checkoutStatus.hidden = false;
       checkoutStatus.classList.add("success");
-      checkoutStatus.textContent = result.message;
+      checkoutStatus.replaceChildren(
+        document.createTextNode(`${result.message} WhatsApp has your order details ready; tap Send to message us. `),
+      );
+      const whatsappLink = document.createElement("a");
+      whatsappLink.href = whatsappUrl;
+      whatsappLink.target = "_blank";
+      whatsappLink.rel = "noopener noreferrer";
+      whatsappLink.textContent = "Open WhatsApp";
+      checkoutStatus.append(whatsappLink);
       checkoutStatus.scrollIntoView({ block: "nearest" });
     }
   } catch (error) {
@@ -857,7 +882,15 @@ checkoutForm?.addEventListener("submit", async (event) => {
     if (checkoutStatus) {
       checkoutStatus.hidden = false;
       checkoutStatus.classList.add("error");
-      checkoutStatus.textContent = error instanceof Error ? error.message : "Your order couldn't be sent. Please try again.";
+      checkoutStatus.replaceChildren(
+        document.createTextNode(`${error instanceof Error ? error.message : "Your order couldn't be saved. Please try again."} WhatsApp is open with your order details; `),
+      );
+      const whatsappLink = document.createElement("a");
+      whatsappLink.href = whatsappUrl;
+      whatsappLink.target = "_blank";
+      whatsappLink.rel = "noopener noreferrer";
+      whatsappLink.textContent = "open WhatsApp";
+      checkoutStatus.append(whatsappLink, document.createTextNode(" and tap Send."));
     }
   } finally {
     if (submitButton) submitButton.disabled = false;

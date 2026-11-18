@@ -21,6 +21,7 @@ class BackendTests(unittest.TestCase):
         self.db_path_patch.start()
         server.recent_submissions.clear()
         server.recent_review_submissions.clear()
+        server.recent_chat_requests.clear()
         server.connect_database().close()
 
         self.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.JolizaHandler)
@@ -77,6 +78,90 @@ class BackendTests(unittest.TestCase):
             body=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
+
+    def submit_chat(self, messages):
+        return self.request(
+            "/api/chat",
+            method="POST",
+            body=json.dumps(messages).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+
+    def test_chat_payment_question_never_calls_ai(self):
+        messages = [{"role": "user", "content": "Can I pay by bank transfer?"}]
+        with patch.object(server, "get_chat_reply") as get_chat_reply:
+            status, payload = self.submit_chat(messages)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            payload["reply"], "Please tap the Payment button for our account details."
+        )
+        get_chat_reply.assert_not_called()
+
+    def test_chat_validates_empty_long_and_excess_history(self):
+        invalid_conversations = (
+            [],
+            [{"role": "user", "content": "  "}],
+            [{"role": "user", "content": "x" * 501}],
+            [{"role": "user", "content": "hello"}] * 7,
+            [{"role": ["user"], "content": "hello"}],
+        )
+        for messages in invalid_conversations:
+            with self.subTest(messages=messages):
+                status, _ = self.submit_chat(messages)
+                self.assertEqual(status, 400)
+
+    def test_chat_returns_ai_reply_for_unmatched_question(self):
+        messages = [
+            {"role": "user", "content": "Do you have a shop in Karu?"},
+            {"role": "assistant", "content": "We are based in Karu, Abuja."},
+            {"role": "user", "content": "Can I order for a party?"},
+        ]
+        with patch.object(server, "get_chat_reply", return_value="Yes, contact us to discuss.") as reply:
+            status, payload = self.submit_chat(messages)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {"reply": "Yes, contact us to discuss."})
+        reply.assert_called_once_with(messages)
+
+    def test_chat_provider_failure_does_not_expose_details(self):
+        messages = [{"role": "user", "content": "Can I visit your shop?"}]
+        with (
+            patch.object(server, "get_chat_reply", side_effect=server.ChatProviderError),
+            patch.object(server.JolizaHandler, "log_error") as log_error,
+        ):
+            status, payload = self.submit_chat(messages)
+
+        self.assertEqual(status, 502)
+        self.assertNotIn("key", json.dumps(payload).lower())
+        self.assertEqual(payload, {"error": "Chat is temporarily unavailable."})
+        log_error.assert_called_once_with("Anthropic chat request failed")
+
+    def test_chat_rate_limit_is_twenty_per_hour(self):
+        messages = [{"role": "user", "content": "Can I visit your shop?"}]
+        with patch.object(server, "get_chat_reply", return_value="Please contact us."):
+            for _ in range(server.CHAT_RATE_LIMIT_COUNT):
+                status, _ = self.submit_chat(messages)
+                self.assertEqual(status, 200)
+            status, payload = self.submit_chat(messages)
+
+        self.assertEqual(status, 429)
+        self.assertIn("Too many", payload["error"])
+
+    def test_chat_preflight_allows_only_configured_site_origin(self):
+        request = urllib.request.Request(
+            self.base_url + "/api/chat",
+            headers={
+                "Origin": "http://localhost:5500",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+            method="OPTIONS",
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            self.assertEqual(response.status, 204)
+            self.assertEqual(response.headers["Access-Control-Allow-Origin"], "http://localhost:5500")
+            self.assertIn("POST", response.headers["Access-Control-Allow-Methods"])
 
     def test_reviews_endpoint_returns_approved_reviews(self):
         status, payload = self.request("/api/reviews")

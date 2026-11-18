@@ -1,0 +1,27 @@
+[
+  {
+    "id": "payment",
+    "keywords": ["pay", "payment", "account", "account number", "transfer", "opay", "bank"],
+    "answer": "You can pay by bank transfer:\nBank: Opay\nAccount number: 9066908023\nAccount name: Joy Waziri Zakariah\nAfter paying, please send your proof of payment on WhatsApp so we can confirm your order."
+  },
+  {
+    "id": "prices",
+    "keywords": ["prices", "price", "how much", "cost", "costs", "cart"],
+    "answer": "Current cart prices: Plain Yogourt (35cl) ₦2,500; Coconut Yogourt (35cl) ₦1,500; Fruit Yogourt (35cl) ₦3,000; Fura Yogourt (35cl) ₦1,800; Greek Yogourt (350ml) ₦4,000; Parfait (350ml) ₦5,000. Add products to your cart to see your order total."
+  },
+  {
+    "id": "delivery",
+    "keywords": ["delivery", "deliver", "shipping", "pickup", "pick up", "preorder", "pre order"],
+    "answer": "Joliza is based in Karu, Abuja. Pre-orders need at least two days’ notice. Add your preferred delivery or pickup date and details with your order; we’ll confirm arrangements and any delivery fees."
+  },
+  {
+    "id": "contact",
+    "keywords": ["contact", "whatsapp", "phone", "call", "hours", "open", "email"],
+    "answer": "Call or WhatsApp us at 08064948591. We’re available Monday to Saturday, 9am–5pm. You can also email lisapurity56@gmail.com. We’re based in Karu, Abuja."
+  },
+  {
+    "id": "products",
+    "keywords": ["flavours", "flavors", "products", "yogourt", "yogurt", "parfait"],
+    "answer": "Joliza makes Plain, Coconut, Fruit, Fura, and Greek Yogourt, plus Parfait. Browse the products on this page to see sizes and prices."
+  }
+]
