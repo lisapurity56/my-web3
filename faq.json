@@ -7,7 +7,7 @@
   {
     "id": "prices",
     "keywords": ["prices", "price", "how much", "cost", "costs", "cart"],
-    "answer": "Current cart prices: Plain Yogourt (35cl) ₦2,500; Coconut Yogourt (35cl) ₦1,500; Fruit Yogourt (35cl) ₦3,000; Fura Yogourt (35cl) ₦1,800; Greek Yogourt (350ml) ₦4,000; Parfait (350ml) ₦5,000. Add products to your cart to see your order total."
+    "answer": "Current cart prices:\nPlain Yogourt (35cl): ₦1,400\nCoconut Yogourt (35cl): ₦1,500\nFruit Yogourt (35cl): ₦3,000\nFura Yogourt (35cl): ₦1,800\nGreek Yogourt (350ml): ₦4,000\nParfait (350ml): ₦5,000\nAdd products to your cart to see your order total."
   },
   {
     "id": "delivery",

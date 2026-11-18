@@ -2,7 +2,7 @@ const PRODUCTS = {
   plain: {
     name: "Plain Yogourt",
     size: "35cl",
-    price: 2500,
+    price: 1400,
     image: "image/Gemini_Generated_Image_i75vtmi75vtmi75v.jpeg",
   },
   coconut: {
