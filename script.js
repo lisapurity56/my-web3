@@ -45,6 +45,7 @@ const BULK_DISCOUNT_THRESHOLD = 10;
 const EVENT_DISCOUNT_THRESHOLD = 200;
 const PREORDER_NOTICE_DAYS = 2;
 const CART_STORAGE_KEY = "joliza-cart-v1";
+const REVIEW_STORAGE_KEY = "joliza-reviews-v1";
 const FLAVOURS = ["Vanilla", "Strawberry", "Banana", "Mango", "Coco", "Mixfruit"];
 const MAX_FLAVOUR_QUANTITY = 50;
 const API_BASE_URL = window.location.port === "5500" ? "http://127.0.0.1:8000" : "";
@@ -80,12 +81,56 @@ const eventStatus = document.querySelector("#event-status");
 const reviewForm = document.querySelector("#review-form");
 const reviewStatus = document.querySelector("#review-status");
 const reviewList = document.querySelector("#review-list");
+const reviewCancel = document.querySelector("#review-cancel");
 const reviewPrevious = document.querySelector("#review-previous");
 const reviewRecent = document.querySelector("#review-recent");
 const reviewCounter = document.querySelector("#review-counter");
 let reviews = [];
 let currentReviewIndex = 0;
 let reviewTouchStartX = null;
+let editingReview = null;
+let sessionSavedReviews = [];
+
+function savedReviews() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REVIEW_STORAGE_KEY) || "[]");
+    sessionSavedReviews = Array.isArray(saved) ? saved.filter((review) => (
+      review
+      && Number.isInteger(review.id)
+      && typeof review.token === "string"
+      && typeof review.name === "string"
+      && Number.isInteger(review.rating)
+      && typeof review.message === "string"
+    )) : [];
+    return sessionSavedReviews;
+  } catch (error) {
+    console.error("Unable to read saved reviews.", error);
+    return sessionSavedReviews;
+  }
+}
+
+function storeSavedReviews(saved) {
+  sessionSavedReviews = saved;
+  try {
+    localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(saved));
+    return true;
+  } catch (error) {
+    console.error("Unable to save review editing credentials.", error);
+    return false;
+  }
+}
+
+function hasSavedReviewToken(id) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REVIEW_STORAGE_KEY) || "[]");
+    return Array.isArray(saved) && saved.some((review) => (
+      review && review.id === id && typeof review.token === "string"
+    ));
+  } catch (error) {
+    console.error("Unable to check saved review credentials.", error);
+    return false;
+  }
+}
 
 function normaliseFlavourQuantity(value) {
   const quantity = Number(value);
@@ -606,6 +651,15 @@ function showReviewStatus(message, isError = false) {
   reviewStatus.textContent = message;
 }
 
+function resetReviewSubmitButton() {
+  const submitButton = reviewForm?.querySelector('button[type="submit"]');
+  if (!submitButton) return;
+  submitButton.replaceChildren(document.createTextNode("Submit review "));
+  const arrow = document.createElement("span");
+  arrow.textContent = "↗";
+  submitButton.append(arrow);
+}
+
 function updateReviewNavigation() {
   const total = reviews.length || 1;
   if (reviewCounter) {
@@ -637,9 +691,23 @@ function showReview(index) {
   const date = document.createElement("time");
   date.className = "review-date";
   date.dateTime = review.date.replace(" ", "T");
-  date.textContent = review.date;
+  date.textContent = `${review.date}${review.edited_at ? " (edited)" : ""}`;
 
   card.append(stars, message, author, date);
+  if (review.isOwn && review.status === "hidden") {
+    const privateNote = document.createElement("p");
+    privateNote.className = "review-private-note";
+    privateNote.textContent = "Only you can see this";
+    card.append(privateNote);
+  }
+  if (hasSavedReviewToken(review.id)) {
+    const editButton = document.createElement("button");
+    editButton.className = "review-edit-button";
+    editButton.type = "button";
+    editButton.dataset.reviewId = String(review.id);
+    editButton.textContent = "Edit";
+    card.append(editButton);
+  }
   reviewList.replaceChildren(card);
   updateReviewNavigation();
 }
@@ -677,17 +745,31 @@ async function loadReviews() {
     const loadedReviews = await response.json();
     if (!Array.isArray(loadedReviews) || loadedReviews.some((review) => (
       !review
+      || !Number.isInteger(review.id)
       || typeof review.name !== "string"
       || !Number.isInteger(review.rating)
       || review.rating < 1
       || review.rating > 5
       || typeof review.message !== "string"
       || typeof review.date !== "string"
+      || (review.edited_at !== null && typeof review.edited_at !== "string")
     ))) {
       throw new TypeError("The reviews response is invalid.");
     }
 
-    reviews = loadedReviews;
+    const saved = savedReviews();
+    const ownedById = new Map(saved.map((review) => [review.id, review]));
+    reviews = loadedReviews.map((review) => {
+      const ownerReview = ownedById.get(review.id);
+      return ownerReview ? { ...ownerReview, ...review, isOwn: true } : review;
+    });
+    const displayedIds = new Set(reviews.map(({ id }) => id));
+    for (const ownReview of saved) {
+      if (!displayedIds.has(ownReview.id)) {
+        reviews.push({ ...ownReview, isOwn: true });
+        displayedIds.add(ownReview.id);
+      }
+    }
     currentReviewIndex = 0;
     reviewList.replaceChildren();
     if (reviews.length === 0) {
@@ -717,6 +799,47 @@ async function loadReviews() {
 
 reviewPrevious?.addEventListener("click", () => changeReview(1));
 reviewRecent?.addEventListener("click", () => changeReview(-1));
+reviewList?.addEventListener("click", (event) => {
+  const button = event.target instanceof Element
+    ? event.target.closest(".review-edit-button")
+    : null;
+  if (!button) return;
+  const review = reviews.find(({ id }) => id === Number(button.dataset.reviewId));
+  const saved = savedReviews().find(({ id }) => id === review?.id);
+  if (!review || !saved || !hasSavedReviewToken(review.id) || !reviewForm) return;
+
+  editingReview = saved;
+  reviewForm.querySelector("#review-name").value = saved.name;
+  reviewForm.querySelector("#review-message").value = saved.message;
+  for (const input of reviewForm.querySelectorAll('input[name="rating"]')) {
+    input.checked = Number(input.value) === saved.rating;
+    input.closest("label")?.classList.toggle("is-selected", input.checked);
+  }
+  const submitButton = reviewForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.textContent = "Save changes";
+  if (reviewCancel) reviewCancel.hidden = false;
+  reviewForm.scrollIntoView({ behavior: "smooth", block: "start" });
+  reviewForm.querySelector("#review-name").focus({ preventScroll: true });
+});
+reviewForm?.addEventListener("change", (event) => {
+  if (!(event.target instanceof HTMLInputElement) || event.target.name !== "rating") return;
+  for (const input of reviewForm.querySelectorAll('input[name="rating"]')) {
+    input.closest("label")?.classList.toggle("is-selected", input.checked);
+  }
+});
+reviewCancel?.addEventListener("click", () => {
+  editingReview = null;
+  reviewForm?.reset();
+  resetReviewSubmitButton();
+  if (reviewCancel) reviewCancel.hidden = true;
+  for (const input of reviewForm?.querySelectorAll('input[name="rating"]') ?? []) {
+    input.closest("label")?.classList.toggle("is-selected", input.checked);
+  }
+  if (reviewStatus) {
+    reviewStatus.hidden = true;
+    reviewStatus.classList.remove("error");
+  }
+});
 reviewList?.addEventListener("touchstart", (event) => {
   reviewTouchStartX = event.changedTouches[0]?.clientX ?? null;
 }, { passive: true });
@@ -748,20 +871,28 @@ reviewForm?.addEventListener("submit", async (event) => {
     reviewStatus.classList.remove("error");
   }
 
+  const isEditing = editingReview !== null;
+  const reviewCredentials = editingReview;
   try {
-    const response = await fetch(`${API_BASE_URL}/api/reviews`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
+    const response = await fetch(
+      isEditing
+        ? `${API_BASE_URL}/api/reviews/${reviewCredentials.id}/edit`
+        : `${API_BASE_URL}/api/reviews`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...(isEditing ? { token: reviewCredentials.token } : {}),
+          name: formData.get("name"),
+          rating: Number(formData.get("rating")),
+          message: formData.get("message"),
+          ...(!isEditing ? { website: formData.get("website") } : {}),
+        }),
       },
-      body: JSON.stringify({
-        name: formData.get("name"),
-        rating: Number(formData.get("rating")),
-        message: formData.get("message"),
-        website: formData.get("website"),
-      }),
-    });
+    );
     const result = await response.json();
     if (!result || typeof result !== "object" || Array.isArray(result)) {
       throw new TypeError("The review response is invalid.");
@@ -770,9 +901,57 @@ reviewForm?.addEventListener("submit", async (event) => {
       throw new Error(typeof result.error === "string" ? result.error : "Your review couldn't be submitted.");
     }
 
+    let updatedReviewId = null;
+    let statusMessage = "Thank you for your review!";
+    if (isEditing && reviewCredentials) {
+      const updatedReview = {
+        ...reviewCredentials,
+        name: result.name,
+        rating: result.rating,
+        message: result.review_message,
+        date: result.date,
+        status: result.status,
+        edited_at: result.edited_at,
+      };
+      storeSavedReviews(savedReviews().map((review) => (
+        review.id === updatedReview.id ? updatedReview : review
+      )));
+      updatedReviewId = updatedReview.id;
+      editingReview = null;
+      statusMessage = "Your review was updated.";
+    } else if (Number.isInteger(result.id) && typeof result.token === "string") {
+      const saved = savedReviews();
+      const createdReview = {
+        id: result.id,
+        token: result.token,
+        name: result.name,
+        rating: result.rating,
+        message: result.review_message,
+        date: result.date,
+        status: result.status,
+        edited_at: null,
+      };
+      const stored = storeSavedReviews([
+        ...saved.filter((review) => review.id !== createdReview.id),
+        createdReview,
+      ]);
+      updatedReviewId = createdReview.id;
+      if (!stored) statusMessage += " This browser couldn't save your edit access.";
+    }
+
     reviewForm.reset();
-    showReviewStatus("Thank you for your review!");
+    const cancelButton = reviewForm.querySelector("#review-cancel");
+    if (cancelButton) cancelButton.hidden = true;
+    resetReviewSubmitButton();
+    for (const input of reviewForm.querySelectorAll('input[name="rating"]')) {
+      input.closest("label")?.classList.toggle("is-selected", input.checked);
+    }
     await loadReviews();
+    if (updatedReviewId !== null) {
+      const ownReviewIndex = reviews.findIndex(({ id }) => id === updatedReviewId);
+      if (ownReviewIndex >= 0) showReview(ownReviewIndex);
+    }
+    showReviewStatus(statusMessage);
   } catch (error) {
     console.error("Unable to submit review.", error);
     showReviewStatus(

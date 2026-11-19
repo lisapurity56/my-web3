@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
+import hashlib
 import hmac
 import html
 import json
 import os
 import re
+import secrets
 import smtplib
 import ssl
 import sqlite3
@@ -12,6 +14,7 @@ import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -196,15 +199,29 @@ def _send_callmebot_review_message(url):
 
 
 def notify_new_review(rating, status, name, message):
+    notify_review("New", rating, status, name, message)
+
+
+def notify_edited_review(rating, status, name, message):
+    notify_review("EDITED", rating, status, name, message)
+
+
+def notify_review(action, rating, status, name, message):
     phone = os.environ.get("WHATSAPP_PHONE", "").strip()
     api_key = os.environ.get("WHATSAPP_APIKEY", "").strip()
     if not phone or not api_key:
         return
 
-    text = (
-        f"New Joliza review ({rating}/5, {status}): {name} - {message}. "
-        "Manage: https://www.joliza-yogourt.com/admin/reviews"
-    )
+    if action == "New":
+        text = (
+            f"New Joliza review ({rating}/5, {status}): {name} - {message}. "
+            "Manage: https://www.joliza-yogourt.com/admin/reviews"
+        )
+    else:
+        text = (
+            f"Joliza review EDITED ({rating}/5, {status}): {name} - {message}. "
+            "Manage: https://www.joliza-yogourt.com/admin/reviews"
+        )
     url = "https://api.callmebot.com/whatsapp.php?" + urlencode(
         {"phone": phone, "text": text, "apikey": api_key}
     )
@@ -217,6 +234,47 @@ def notify_new_review(rating, status, name, message):
             f"CallMeBot review notification failed ({type(error).__name__}).",
             file=sys.stderr,
         )
+
+
+def validate_review_fields(payload):
+    name = payload.get("name")
+    rating = payload.get("rating")
+    message = payload.get("message")
+    if not isinstance(name, str) or type(rating) is not int or not isinstance(message, str):
+        raise ValueError("Invalid review data.")
+    name = re.sub(r"<[^>]*>", "", name).strip()
+    message = re.sub(r"<[^>]*>", "", message).strip()
+    if not name or len(name) > 60:
+        raise ValueError("Enter your name (up to 60 characters).")
+    if not 1 <= rating <= 5:
+        raise ValueError("Choose a rating from 1 to 5 stars.")
+    if len(message) < 10 or len(message) > 500:
+        raise ValueError("Enter a review between 10 and 500 characters.")
+
+    flagged = bool(
+        REVIEW_LINK_PATTERN.search(name)
+        or REVIEW_LINK_PATTERN.search(message)
+        or REVIEW_EMAIL_PATTERN.search(name)
+        or REVIEW_EMAIL_PATTERN.search(message)
+        or any(
+            word and re.search(rf"\b{re.escape(word)}\b", f"{name} {message}", re.IGNORECASE)
+            for word in BLOCKED_WORDS
+        )
+    )
+    status = "hidden" if flagged or rating < 4 else "approved"
+    return name, rating, message, flagged, status
+
+
+def review_client_key(handler):
+    forwarded_for = handler.headers.get("X-Forwarded-For", "")
+    return forwarded_for.split(",", 1)[0].strip() or handler.client_address[0]
+
+
+def review_submissions_for(client_key, now):
+    submissions = recent_review_submissions[client_key]
+    while submissions and now - submissions[0] >= REVIEW_RATE_LIMIT_WINDOW_SECONDS:
+        submissions.popleft()
+    return submissions
 
 
 def connect_database():
@@ -260,7 +318,10 @@ def connect_database():
                     CHECK (status IN ('approved', 'hidden')),
                 flagged INTEGER NOT NULL DEFAULT 0 CHECK (flagged IN (0, 1)),
                 ip TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                edit_token_hash TEXT,
+                edited_at TEXT,
+                edit_count INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -302,7 +363,10 @@ def connect_database():
                     CHECK (status IN ('approved', 'hidden')),
                 flagged INTEGER NOT NULL DEFAULT 0 CHECK (flagged IN (0, 1)),
                 ip TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                edit_token_hash TEXT,
+                edited_at TEXT,
+                edit_count INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -317,6 +381,17 @@ def connect_database():
     else:
         connection.execute(
             "UPDATE reviews SET status = 'hidden' WHERE status NOT IN ('approved', 'hidden')"
+        )
+    review_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(reviews)").fetchall()
+    }
+    if "edit_token_hash" not in review_columns:
+        connection.execute("ALTER TABLE reviews ADD COLUMN edit_token_hash TEXT")
+    if "edited_at" not in review_columns:
+        connection.execute("ALTER TABLE reviews ADD COLUMN edited_at TEXT")
+    if "edit_count" not in review_columns:
+        connection.execute(
+            "ALTER TABLE reviews ADD COLUMN edit_count INTEGER NOT NULL DEFAULT 0"
         )
     connection.commit()
     try:
@@ -569,7 +644,7 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                 with connect_database() as connection:
                     reviews = connection.execute(
                         """
-                        SELECT name, rating, message, created_at
+                        SELECT id, name, rating, message, created_at, edited_at
                         FROM reviews
                         WHERE status = 'approved'
                         ORDER BY created_at DESC, id DESC
@@ -583,8 +658,15 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                 self,
                 200,
                 [
-                    {"name": name, "rating": rating, "message": message, "date": created_at}
-                    for name, rating, message, created_at in reviews
+                    {
+                        "id": review_id,
+                        "name": name,
+                        "rating": rating,
+                        "message": message,
+                        "date": created_at,
+                        "edited_at": edited_at,
+                    }
+                    for review_id, name, rating, message, created_at, edited_at in reviews
                 ],
             )
             return
@@ -622,7 +704,10 @@ class JolizaHandler(SimpleHTTPRequestHandler):
         super().do_HEAD()
 
     def do_OPTIONS(self):
-        if urlsplit(self.path).path not in {"/api/inquiries", "/api/reviews", "/api/chat"}:
+        path = urlsplit(self.path).path
+        if path not in {"/api/inquiries", "/api/reviews", "/api/chat"} and not re.fullmatch(
+            r"/api/reviews/[0-9]+/edit", path
+        ):
             send_json(self, 404, {"error": "Not found."})
             return
         self.send_response(204)
@@ -647,6 +732,10 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/reviews":
             self.create_review()
+            return
+        review_edit = re.fullmatch(r"/api/reviews/([0-9]+)/edit", path)
+        if review_edit:
+            self.edit_review(int(review_edit.group(1)))
             return
         if path != "/api/inquiries":
             send_json(self, 404, {"error": "Not found."})
@@ -852,12 +941,9 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        forwarded_for = self.headers.get("X-Forwarded-For", "")
-        client_key = forwarded_for.split(",", 1)[0].strip() or self.client_address[0]
-        submissions = recent_review_submissions[client_key]
+        client_key = review_client_key(self)
         now = time.monotonic()
-        while submissions and now - submissions[0] >= REVIEW_RATE_LIMIT_WINDOW_SECONDS:
-            submissions.popleft()
+        submissions = review_submissions_for(client_key, now)
         if len(submissions) >= REVIEW_RATE_LIMIT_COUNT:
             send_json(
                 self,
@@ -866,35 +952,11 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        name = payload.get("name")
-        rating = payload.get("rating")
-        message = payload.get("message")
-        if not isinstance(name, str) or type(rating) is not int or not isinstance(message, str):
-            send_json(self, 400, {"error": "Invalid review data."})
+        try:
+            name, rating, message, flagged, review_status = validate_review_fields(payload)
+        except ValueError as error:
+            send_json(self, 400, {"error": str(error)})
             return
-        name = re.sub(r"<[^>]*>", "", name).strip()
-        message = re.sub(r"<[^>]*>", "", message).strip()
-        if not name or len(name) > 60:
-            send_json(self, 400, {"error": "Enter your name (up to 60 characters)."})
-            return
-        if not 1 <= rating <= 5:
-            send_json(self, 400, {"error": "Choose a rating from 1 to 5 stars."})
-            return
-        if len(message) < 10 or len(message) > 500:
-            send_json(self, 400, {"error": "Enter a review between 10 and 500 characters."})
-            return
-
-        flagged = bool(
-            REVIEW_LINK_PATTERN.search(name)
-            or REVIEW_LINK_PATTERN.search(message)
-            or REVIEW_EMAIL_PATTERN.search(name)
-            or REVIEW_EMAIL_PATTERN.search(message)
-            or any(
-                word and re.search(rf"\b{re.escape(word)}\b", f"{name} {message}", re.IGNORECASE)
-                for word in BLOCKED_WORDS
-            )
-        )
-        review_status = "hidden" if flagged or rating < 4 else "approved"
         submissions.append(now)
         try:
             with connect_database() as connection:
@@ -914,13 +976,20 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                         {"success": True, "message": "Thank you for your review!"},
                     )
                     return
+                token = secrets.token_urlsafe(24)
+                token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
                 connection.execute(
                     """
-                    INSERT INTO reviews (name, rating, message, status, flagged, ip)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO reviews
+                        (name, rating, message, status, flagged, ip, edit_token_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (name, rating, message, review_status, int(flagged), client_key),
+                    (name, rating, message, review_status, int(flagged), client_key, token_hash),
                 )
+                review_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+                created_at = connection.execute(
+                    "SELECT created_at FROM reviews WHERE id = ?", (review_id,)
+                ).fetchone()[0]
         except (sqlite3.Error, OSError):
             self.log_error("Failed to save a review")
             send_json(self, 500, {"error": "We couldn't save your review. Please try again later."})
@@ -933,6 +1002,122 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             {
                 "success": True,
                 "message": "Thank you for your review!",
+                "id": review_id,
+                "token": token,
+                "status": review_status,
+                "date": created_at,
+                "name": name,
+                "rating": rating,
+                "review_message": message,
+            },
+        )
+
+    def edit_review(self, review_id):
+        if self.headers.get_content_type() != "application/json":
+            send_json(self, 415, {"error": "Send the review as JSON."})
+            return
+        try:
+            body_length = int(self.headers.get("Content-Length", ""))
+        except (TypeError, ValueError):
+            body_length = 0
+        if body_length < 1 or body_length > MAX_BODY_BYTES:
+            send_json(self, 413, {"error": "The review is too large."})
+            return
+        try:
+            payload = json.loads(self.rfile.read(body_length))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            send_json(self, 400, {"error": "Invalid JSON."})
+            return
+        if not isinstance(payload, dict) or not isinstance(payload.get("token"), str):
+            send_json(self, 400, {"error": "Invalid review data."})
+            return
+
+        token_hash = hashlib.sha256(payload["token"].encode("utf-8")).hexdigest()
+        client_key = review_client_key(self)
+        now = time.monotonic()
+        try:
+            with connect_database() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                stored = connection.execute(
+                    """
+                    SELECT edit_token_hash, created_at, edit_count
+                    FROM reviews WHERE id = ?
+                    """,
+                    (review_id,),
+                ).fetchone()
+                stored_hash = stored[0] if stored and stored[0] else ""
+                if not hmac.compare_digest(
+                    stored_hash.encode("utf-8"), token_hash.encode("utf-8")
+                ):
+                    send_json(self, 403, {"error": "This review cannot be edited from this browser."})
+                    return
+
+                try:
+                    created_at = datetime.fromisoformat(stored[1].replace("Z", "+00:00"))
+                except (TypeError, ValueError):
+                    send_json(self, 400, {"error": "This review's creation date is invalid."})
+                    return
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) - created_at > timedelta(days=7):
+                    send_json(self, 400, {"error": "Reviews can only be edited within 7 days of submission."})
+                    return
+                if stored[2] >= 3:
+                    send_json(self, 400, {"error": "A review can only be edited 3 times."})
+                    return
+
+                try:
+                    name, rating, message, flagged, review_status = validate_review_fields(payload)
+                except ValueError as error:
+                    send_json(self, 400, {"error": str(error)})
+                    return
+
+                submissions = review_submissions_for(client_key, now)
+                if len(submissions) >= REVIEW_RATE_LIMIT_COUNT:
+                    send_json(
+                        self,
+                        429,
+                        {"error": "You've reached the limit of 3 reviews per hour. Please try again later."},
+                    )
+                    return
+
+                edited_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                cursor = connection.execute(
+                    """
+                    UPDATE reviews
+                    SET name = ?, rating = ?, message = ?, status = ?, flagged = ?,
+                        edited_at = ?, edit_count = edit_count + 1
+                    WHERE id = ? AND edit_token_hash = ? AND edit_count < 3
+                    """,
+                    (
+                        name, rating, message, review_status, int(flagged), edited_at,
+                        review_id, stored_hash,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    send_json(self, 400, {"error": "A review can only be edited 3 times."})
+                    return
+                submissions.append(now)
+        except (sqlite3.Error, OSError):
+            self.log_error("Failed to edit review")
+            send_json(self, 500, {"error": "We couldn't update your review. Please try again later."})
+            return
+
+        notify_edited_review(rating, review_status, name, message)
+        send_json(
+            self,
+            200,
+            {
+                "success": True,
+                "message": "Your review was updated.",
+                "id": review_id,
+                "status": review_status,
+                "name": name,
+                "rating": rating,
+                "review_message": message,
+                "date": stored[1],
+                "edited_at": edited_at,
+                "edit_count": stored[2] + 1,
             },
         )
 
