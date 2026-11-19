@@ -284,12 +284,20 @@ h2 { font-size: clamp(48px, 5vw, 70px); margin-bottom: 29px; }
 .reviews-grid { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: clamp(40px, 8vw, 100px); }
 .reviews-grid h2 { margin-bottom: 24px; }
 .reviews-intro { max-width: 390px; color: var(--muted); font-size: 14px; line-height: 1.8; }
-.review-list { display: grid; gap: 12px; margin-top: 30px; }
+.review-slider { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 12px; margin-top: 30px; }
+.review-list { min-width: 0; min-height: 250px; }
+.review-nav { display: grid; place-items: center; width: 44px; height: 44px; padding: 0 0 4px; border: 1px solid var(--deep-sage); border-radius: 50%; background: var(--cream); color: var(--deep-sage); font: 30px/1 var(--sans); cursor: pointer; transition: background-color .2s ease, color .2s ease, opacity .2s ease, transform .2s ease; }
+.review-nav:not(:disabled):hover { background: var(--deep-sage); color: var(--cream); transform: scale(1.05); }
+.review-nav:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.review-nav:disabled { cursor: not-allowed; opacity: .4; }
+.review-counter { margin: 12px 0 0; color: var(--deep-sage); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-align: center; }
 .review-message { margin: 0; padding: 20px 22px; border: 1px solid var(--line); background: rgba(249, 246, 239, .65); color: var(--muted); font-size: 13px; line-height: 1.6; }
 .review-message-error { border-color: rgba(161, 61, 44, .2); color: #8d4638; }
 .review-preview-link { color: var(--deep-sage); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .review-preview-link:focus-visible { outline: 2px solid var(--deep-sage); outline-offset: 3px; }
-.review-card { padding: 22px 24px; border: 1px solid var(--line); background: var(--cream); }
+.review-card { min-height: 250px; padding: 22px 24px; border: 1px solid var(--line); background: var(--cream); animation: review-arrive .24s ease both; }
+@keyframes review-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .review-card { animation: none; } }
 .review-stars { margin-bottom: 12px; color: #b87925; letter-spacing: .12em; }
 .review-card blockquote { margin: 0 0 18px; font: 18px/1.5 var(--serif); }
 .review-author { margin: 0; color: var(--deep-sage); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }

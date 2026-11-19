@@ -80,6 +80,12 @@ const eventStatus = document.querySelector("#event-status");
 const reviewForm = document.querySelector("#review-form");
 const reviewStatus = document.querySelector("#review-status");
 const reviewList = document.querySelector("#review-list");
+const reviewPrevious = document.querySelector("#review-previous");
+const reviewRecent = document.querySelector("#review-recent");
+const reviewCounter = document.querySelector("#review-counter");
+let reviews = [];
+let currentReviewIndex = 0;
+let reviewTouchStartX = null;
 
 function normaliseFlavourQuantity(value) {
   const quantity = Number(value);
@@ -600,6 +606,50 @@ function showReviewStatus(message, isError = false) {
   reviewStatus.textContent = message;
 }
 
+function updateReviewNavigation() {
+  const total = reviews.length || 1;
+  if (reviewCounter) {
+    reviewCounter.textContent = `${String(currentReviewIndex + 1).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
+  }
+  if (reviewPrevious) reviewPrevious.disabled = currentReviewIndex >= reviews.length - 1;
+  if (reviewRecent) reviewRecent.disabled = currentReviewIndex === 0;
+}
+
+function showReview(index) {
+  if (!reviewList || index < 0 || index >= reviews.length) return;
+  currentReviewIndex = index;
+  const review = reviews[currentReviewIndex];
+  const card = document.createElement("article");
+  card.className = "review-card";
+
+  const stars = document.createElement("p");
+  stars.className = "review-stars";
+  stars.setAttribute("aria-label", `${review.rating} out of 5 stars`);
+  stars.textContent = `${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}`;
+
+  const message = document.createElement("blockquote");
+  message.textContent = review.message;
+
+  const author = document.createElement("p");
+  author.className = "review-author";
+  author.textContent = review.name;
+
+  const date = document.createElement("time");
+  date.className = "review-date";
+  date.dateTime = review.date.replace(" ", "T");
+  date.textContent = review.date;
+
+  card.append(stars, message, author, date);
+  reviewList.replaceChildren(card);
+  updateReviewNavigation();
+}
+
+function changeReview(direction) {
+  const nextIndex = currentReviewIndex + direction;
+  if (nextIndex < 0 || nextIndex >= reviews.length) return;
+  showReview(nextIndex);
+}
+
 async function loadReviews() {
   if (!reviewList) return;
   reviewList.setAttribute("aria-busy", "true");
@@ -624,8 +674,8 @@ async function loadReviews() {
     }
     if (!response.ok) throw new Error(`Review request failed (${response.status}).`);
 
-    const reviews = await response.json();
-    if (!Array.isArray(reviews) || reviews.some((review) => (
+    const loadedReviews = await response.json();
+    if (!Array.isArray(loadedReviews) || loadedReviews.some((review) => (
       !review
       || typeof review.name !== "string"
       || !Number.isInteger(review.rating)
@@ -637,50 +687,54 @@ async function loadReviews() {
       throw new TypeError("The reviews response is invalid.");
     }
 
+    reviews = loadedReviews;
+    currentReviewIndex = 0;
     reviewList.replaceChildren();
     if (reviews.length === 0) {
       const emptyMessage = document.createElement("p");
       emptyMessage.className = "review-message";
       emptyMessage.textContent = "No reviews yet. Be the first to share your experience.";
       reviewList.append(emptyMessage);
+      updateReviewNavigation();
       return;
     }
 
-    for (const review of reviews) {
-      const card = document.createElement("article");
-      card.className = "review-card";
-
-      const stars = document.createElement("p");
-      stars.className = "review-stars";
-      stars.setAttribute("aria-label", `${review.rating} out of 5 stars`);
-      stars.textContent = `${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}`;
-
-      const message = document.createElement("blockquote");
-      message.textContent = review.message;
-
-      const author = document.createElement("p");
-      author.className = "review-author";
-      author.textContent = review.name;
-
-      const date = document.createElement("time");
-      date.className = "review-date";
-      date.dateTime = review.date.replace(" ", "T");
-      date.textContent = review.date;
-
-      card.append(stars, message, author, date);
-      reviewList.append(card);
-    }
+    showReview(0);
   } catch (error) {
     console.error("Unable to load reviews.", error);
+    reviews = [];
+    currentReviewIndex = 0;
     reviewList.replaceChildren();
     const errorMessage = document.createElement("p");
     errorMessage.className = "review-message review-message-error";
     errorMessage.textContent = "Reviews couldn't be loaded right now. Please try again later.";
     reviewList.append(errorMessage);
+    updateReviewNavigation();
   } finally {
     reviewList.setAttribute("aria-busy", "false");
   }
 }
+
+reviewPrevious?.addEventListener("click", () => changeReview(1));
+reviewRecent?.addEventListener("click", () => changeReview(-1));
+reviewList?.addEventListener("touchstart", (event) => {
+  reviewTouchStartX = event.changedTouches[0]?.clientX ?? null;
+}, { passive: true });
+reviewList?.addEventListener("touchend", (event) => {
+  const endX = event.changedTouches[0]?.clientX;
+  if (reviewTouchStartX === null || endX === undefined) return;
+  const distance = endX - reviewTouchStartX;
+  if (Math.abs(distance) >= 40) changeReview(distance > 0 ? 1 : -1);
+  reviewTouchStartX = null;
+}, { passive: true });
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable='true']")) return;
+  const direction = event.key === "ArrowLeft" ? 1 : -1;
+  if (currentReviewIndex + direction < 0 || currentReviewIndex + direction >= reviews.length) return;
+  event.preventDefault();
+  changeReview(direction);
+});
 
 reviewForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -718,7 +772,7 @@ reviewForm?.addEventListener("submit", async (event) => {
 
     reviewForm.reset();
     showReviewStatus("Thank you for your review!");
-    loadReviews();
+    await loadReviews();
   } catch (error) {
     console.error("Unable to submit review.", error);
     showReviewStatus(

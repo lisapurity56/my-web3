@@ -392,9 +392,14 @@
           <p class="eyebrow"><span></span> Customer reviews</p>
           <h2>Selected customer<br /><i>reviews</i></h2>
           <p class="reviews-intro">We show reviews that meet our community guidelines.</p>
-          <div class="review-list" id="review-list" aria-live="polite" aria-busy="true">
-            <p class="review-message">Loading reviews…</p>
+          <div class="review-slider">
+            <button class="review-nav" id="review-previous" type="button" aria-label="Previous review" disabled>‹</button>
+            <div class="review-list" id="review-list" aria-live="polite" aria-busy="true">
+              <p class="review-message">Loading reviews…</p>
+            </div>
+            <button class="review-nav" id="review-recent" type="button" aria-label="Recent review" disabled>›</button>
           </div>
+          <p class="review-counter" id="review-counter" aria-live="polite">01 / 01</p>
         </div>
         <form class="review-form" id="review-form">
           <div class="form-heading"><span>Share your feedback</span><span>01 / 01</span></div>
