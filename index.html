@@ -399,7 +399,7 @@
         <form class="review-form" id="review-form">
           <div class="form-heading"><span>Share your feedback</span><span>01 / 01</span></div>
           <label for="review-name">Your name</label>
-          <input id="review-name" name="name" type="text" autocomplete="name" maxlength="100" required />
+          <input id="review-name" name="name" type="text" autocomplete="name" maxlength="60" required />
           <fieldset class="rating-field">
             <legend>Your rating</legend>
             <div class="rating-options" role="radiogroup" aria-label="Choose a rating">
@@ -411,8 +411,9 @@
             </div>
             <p class="rating-hint">Select the stars that match your experience.</p>
           </fieldset>
-          <label for="review-comment">Your review</label>
-          <textarea id="review-comment" name="comment" rows="4" maxlength="1500" placeholder="What made your Joliza moment special?" required></textarea>
+          <label for="review-message">Your review</label>
+          <textarea id="review-message" name="message" rows="4" maxlength="500" placeholder="What made your Joliza moment special?" required></textarea>
+          <p class="review-note">Reviews are checked before they appear.</p>
           <button class="button button-dark" type="submit">Submit review <span>↗</span></button>
           <p class="review-status" id="review-status" role="status" aria-live="polite" hidden></p>
         </form>

@@ -8,6 +8,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlencode
 from unittest.mock import patch
 
 import server
@@ -50,6 +51,17 @@ class BackendTests(unittest.TestCase):
             payload = json.loads(raw_body) if raw_body else None
             return response.status, payload
 
+    def request_text(self, path, method="GET", body=None, headers=None):
+        request = urllib.request.Request(
+            self.base_url + path, data=body, headers=headers or {}, method=method
+        )
+        try:
+            response = urllib.request.urlopen(request, timeout=3)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            return response.status, response.read().decode("utf-8")
+
     def submit_inquiry(self, **overrides):
         payload = {
             "inquiry_type": "general",
@@ -69,7 +81,7 @@ class BackendTests(unittest.TestCase):
         payload = {
             "name": "Test Reviewer",
             "rating": 5,
-            "comment": "Creamy and delicious.",
+            "message": "Creamy and delicious.",
         }
         payload.update(overrides)
         return self.request(
@@ -170,27 +182,43 @@ class BackendTests(unittest.TestCase):
 
         with server.connect_database() as connection:
             connection.execute(
-                "INSERT INTO reviews (name, rating, comment, approved) VALUES (?, ?, ?, 1)",
-                ("Test Reviewer", 5, "Creamy and delicious."),
+                """
+                INSERT INTO reviews (name, rating, message, status, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("Test Reviewer", 5, "Creamy and delicious.", "approved", "2026-01-02"),
+            )
+            connection.execute(
+                """
+                INSERT INTO reviews (name, rating, message, status, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("Hidden Reviewer", 1, "Do not show.", "hidden", "2026-01-03"),
             )
 
         status, payload = self.request("/api/reviews")
         self.assertEqual(status, 200)
         self.assertEqual(
             payload,
-            [{"name": "Test Reviewer", "rating": 5, "comment": "Creamy and delicious."}],
+            [{
+                "name": "Test Reviewer",
+                "rating": 5,
+                "message": "Creamy and delicious.",
+                "date": "2026-01-02",
+            }],
         )
 
     def test_review_submission_is_saved_for_moderation(self):
         status, payload = self.submit_review()
         self.assertEqual(status, 201)
-        self.assertIn("moderation", payload["message"])
+        self.assertTrue(payload["success"])
+        self.assertIn("approval", payload["message"])
 
         with server.connect_database() as connection:
             review = connection.execute(
-                "SELECT name, rating, comment, approved FROM reviews"
+                "SELECT name, rating, message, status FROM reviews"
             ).fetchone()
-        self.assertEqual(review, ("Test Reviewer", 5, "Creamy and delicious.", 0))
+        self.assertEqual(review, ("Test Reviewer", 5, "Creamy and delicious.", "pending"))
 
         status, public_reviews = self.request("/api/reviews")
         self.assertEqual(status, 200)
@@ -200,6 +228,83 @@ class BackendTests(unittest.TestCase):
         status, payload = self.submit_review(rating=6)
         self.assertEqual(status, 400)
         self.assertIn("rating", payload["error"])
+
+    def test_review_limits_and_schema_migration(self):
+        self.assertEqual(self.submit_review(name="N" * 61)[0], 400)
+        self.assertEqual(self.submit_review(message="M" * 501)[0], 400)
+
+        with server.connect_database() as connection:
+            connection.execute("DROP TABLE reviews")
+            connection.execute(
+                """
+                CREATE TABLE reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    rating INTEGER NOT NULL,
+                    comment TEXT NOT NULL,
+                    approved INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO reviews (name, rating, comment, approved)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("Old Reviewer", 4, "Still lovely.", 1),
+            )
+        server.connect_database().close()
+        with server.connect_database() as connection:
+            migrated = connection.execute(
+                "SELECT name, message, status FROM reviews"
+            ).fetchone()
+        self.assertEqual(migrated, ("Old Reviewer", "Still lovely.", "approved"))
+
+    def test_admin_can_approve_and_hide_reviews(self):
+        with server.connect_database() as connection:
+            review_id = connection.execute(
+                "INSERT INTO reviews (name, rating, message) VALUES (?, ?, ?)",
+                ("<Reviewer>", 4, "<script>not executable</script>"),
+            ).lastrowid
+
+        with patch.dict("os.environ", {"ADMIN_KEY": "review-secret"}):
+            self.assertEqual(self.request_text("/admin/reviews")[0], 403)
+            self.assertEqual(self.request_text("/admin/reviews?key=wrong")[0], 403)
+            status, page = self.request_text("/admin/reviews?key=review-secret")
+            self.assertEqual(status, 200)
+            self.assertIn("&lt;Reviewer&gt;", page)
+            self.assertIn("Approve", page)
+            self.assertIn("Hide", page)
+
+            body = urlencode({"key": "wrong"}).encode()
+            status, _ = self.request_text(
+                f"/admin/reviews/{review_id}/approve",
+                method="POST",
+                body=body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            self.assertEqual(status, 403)
+
+            body = urlencode({"key": "review-secret"}).encode()
+            self.request_text(
+                f"/admin/reviews/{review_id}/approve",
+                method="POST",
+                body=body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            status, reviews = self.request("/api/reviews")
+            self.assertEqual(status, 200)
+            self.assertEqual(len(reviews), 1)
+            self.assertEqual(reviews[0]["message"], "<script>not executable</script>")
+
+            self.request_text(
+                f"/admin/reviews/{review_id}/hide",
+                method="POST",
+                body=body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            self.assertEqual(self.request("/api/reviews"), (200, []))
 
     def test_valid_inquiry_is_saved_even_if_email_is_not_configured(self):
         with patch.object(server, "send_inquiry_notification", return_value=False):

@@ -605,7 +605,7 @@ async function loadReviews() {
   reviewList.setAttribute("aria-busy", "true");
 
   try {
-    const response = await fetch("/api/reviews", {
+    const response = await fetch(`${API_BASE_URL}/api/reviews`, {
       headers: { Accept: "application/json" },
     });
     if (response.status === 404) {
@@ -631,7 +631,8 @@ async function loadReviews() {
       || !Number.isInteger(review.rating)
       || review.rating < 1
       || review.rating > 5
-      || typeof review.comment !== "string"
+      || typeof review.message !== "string"
+      || typeof review.date !== "string"
     ))) {
       throw new TypeError("The reviews response is invalid.");
     }
@@ -654,14 +655,19 @@ async function loadReviews() {
       stars.setAttribute("aria-label", `${review.rating} out of 5 stars`);
       stars.textContent = `${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}`;
 
-      const comment = document.createElement("blockquote");
-      comment.textContent = review.comment;
+      const message = document.createElement("blockquote");
+      message.textContent = review.message;
 
       const author = document.createElement("p");
       author.className = "review-author";
       author.textContent = review.name;
 
-      card.append(stars, comment, author);
+      const date = document.createElement("time");
+      date.className = "review-date";
+      date.dateTime = review.date.replace(" ", "T");
+      date.textContent = review.date;
+
+      card.append(stars, message, author, date);
       reviewList.append(card);
     }
   } catch (error) {
@@ -689,7 +695,7 @@ reviewForm?.addEventListener("submit", async (event) => {
   }
 
   try {
-    const response = await fetch("/api/reviews", {
+    const response = await fetch(`${API_BASE_URL}/api/reviews`, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -698,7 +704,7 @@ reviewForm?.addEventListener("submit", async (event) => {
       body: JSON.stringify({
         name: formData.get("name"),
         rating: Number(formData.get("rating")),
-        comment: formData.get("comment"),
+        message: formData.get("message"),
       }),
     });
     const result = await response.json();
@@ -713,7 +719,7 @@ reviewForm?.addEventListener("submit", async (event) => {
     showReviewStatus(
       typeof result.message === "string"
         ? result.message
-        : "Thanks for sharing your review. It will appear after moderation.",
+        : "Thanks for sharing your review. It will appear after approval.",
     );
   } catch (error) {
     console.error("Unable to submit review.", error);

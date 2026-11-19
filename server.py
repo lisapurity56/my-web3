@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hmac
+import html
 import json
 import os
 import re
@@ -13,7 +14,7 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 from backend.app.whatsapp_notifications import send_whatsapp_notification
 
@@ -197,18 +198,53 @@ def connect_database():
         connection.execute(
             "ALTER TABLE inquiries ADD COLUMN flavours TEXT NOT NULL DEFAULT '[]'"
         )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS reviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
-            comment TEXT NOT NULL,
-            approved INTEGER NOT NULL DEFAULT 0 CHECK (approved IN (0, 1)),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    review_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(reviews)").fetchall()
+    }
+    if not review_columns:
+        connection.execute(
+            """
+            CREATE TABLE reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+                message TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'approved', 'hidden')),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         )
-        """
-    )
+    elif not {"id", "name", "rating", "message", "status", "created_at"} <= review_columns:
+        legacy_columns = {"id", "name", "rating", "comment", "approved", "created_at"}
+        if not legacy_columns <= review_columns:
+            connection.close()
+            raise sqlite3.DatabaseError("The reviews table has an unsupported schema.")
+        connection.execute("BEGIN")
+        connection.execute("ALTER TABLE reviews RENAME TO reviews_legacy")
+        connection.execute(
+            """
+            CREATE TABLE reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+                message TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'approved', 'hidden')),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO reviews (id, name, rating, message, status, created_at)
+            SELECT id, name, rating, comment,
+                   CASE WHEN approved = 1 THEN 'approved' ELSE 'pending' END,
+                   created_at
+            FROM reviews_legacy
+            """
+        )
+        connection.execute("DROP TABLE reviews_legacy")
     connection.commit()
     try:
         DB_PATH.chmod(0o600)
@@ -306,10 +342,88 @@ class JolizaHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_admin_html(self, status, page):
+        body = page.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+            "base-uri 'none'; frame-ancestors 'none'",
+        )
+        self.end_headers()
+        self.wfile.write(body)
+
+    def admin_key_is_valid(self, key):
+        configured_key = os.environ.get("ADMIN_KEY", "")
+        return bool(configured_key and key) and hmac.compare_digest(configured_key, key)
+
+    def admin_reviews_page(self, status, message=""):
+        key = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get("key", [""])[0]
+        if not self.admin_key_is_valid(key):
+            self.send_admin_html(status, "<!doctype html><title>Forbidden</title><p>Forbidden.</p>")
+            return
+
+        try:
+            with connect_database() as connection:
+                reviews = connection.execute(
+                    """
+                    SELECT id, name, rating, message, status, created_at
+                    FROM reviews
+                    ORDER BY created_at DESC, id DESC
+                    """
+                ).fetchall()
+        except (sqlite3.Error, OSError):
+            self.log_error("Failed to load admin reviews")
+            self.send_admin_html(
+                500, "<!doctype html><title>Error</title><p>Reviews couldn't be loaded.</p>"
+            )
+            return
+
+        rows = []
+        for review_id, name, rating, review_message, review_status, created_at in reviews:
+            actions = "".join(
+                f"""
+                <form method="post" action="/admin/reviews/{review_id}/{action}">
+                  <input type="hidden" name="key" value="{html.escape(key, quote=True)}">
+                  <button type="submit">{label}</button>
+                </form>
+                """
+                for action, label in (("approve", "Approve"), ("hide", "Hide"))
+            )
+            rows.append(
+                "<tr>"
+                f"<td>{review_id}</td>"
+                f"<td>{html.escape(name)}</td>"
+                f"<td>{rating}</td>"
+                f"<td>{html.escape(review_message)}</td>"
+                f"<td>{html.escape(review_status)}</td>"
+                f"<td>{html.escape(created_at)}</td>"
+                f"<td>{actions}</td>"
+                "</tr>"
+            )
+        notice = f"<p>{html.escape(message)}</p>" if message else ""
+        page = (
+            "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>Review moderation</title><h1>Review moderation</h1>"
+            f"{notice}<table><thead><tr><th>ID</th><th>Name</th><th>Rating</th>"
+            "<th>Message</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table></html>"
+        )
+        self.send_admin_html(200, page)
+
     def do_GET(self):
         path = urlsplit(self.path).path
         if path == "/api/health":
             send_json(self, 200, {"status": "ok"})
+            return
+
+        if path == "/admin/reviews":
+            self.admin_reviews_page(403)
             return
 
         if path == "/api/admin/inquiries":
@@ -371,11 +485,10 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                 with connect_database() as connection:
                     reviews = connection.execute(
                         """
-                        SELECT name, rating, comment
+                        SELECT name, rating, message, created_at
                         FROM reviews
-                        WHERE approved = 1
+                        WHERE status = 'approved'
                         ORDER BY created_at DESC, id DESC
-                        LIMIT 20
                         """
                     ).fetchall()
             except (sqlite3.Error, OSError):
@@ -386,8 +499,8 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                 self,
                 200,
                 [
-                    {"name": name, "rating": rating, "comment": comment}
-                    for name, rating, comment in reviews
+                    {"name": name, "rating": rating, "message": message, "date": created_at}
+                    for name, rating, message, created_at in reviews
                 ],
             )
             return
@@ -440,6 +553,11 @@ class JolizaHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlsplit(self.path).path
+        admin_action = re.fullmatch(r"/admin/reviews/([0-9]+)/(approve|hide)", path)
+        if admin_action:
+            status = "approved" if admin_action.group(2) == "approve" else "hidden"
+            self.update_review_status(int(admin_action.group(1)), status)
+            return
         if path == "/api/chat":
             self.chat()
             return
@@ -643,7 +761,10 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             send_json(
                 self,
                 201,
-                {"message": "Thanks for sharing your review. It will appear after moderation."},
+                {
+                    "success": True,
+                    "message": "Thanks for sharing your review. It will appear after approval.",
+                },
             )
             return
 
@@ -658,27 +779,27 @@ class JolizaHandler(SimpleHTTPRequestHandler):
 
         name = payload.get("name")
         rating = payload.get("rating")
-        comment = payload.get("comment")
-        if not isinstance(name, str) or type(rating) is not int or not isinstance(comment, str):
+        message = payload.get("message")
+        if not isinstance(name, str) or type(rating) is not int or not isinstance(message, str):
             send_json(self, 400, {"error": "Invalid review data."})
             return
         name = name.strip()
-        comment = comment.strip()
-        if not name or len(name) > 100:
-            send_json(self, 400, {"error": "Enter your name (up to 100 characters)."})
+        message = message.strip()
+        if not name or len(name) > 60:
+            send_json(self, 400, {"error": "Enter your name (up to 60 characters)."})
             return
         if not 1 <= rating <= 5:
             send_json(self, 400, {"error": "Choose a rating from 1 to 5 stars."})
             return
-        if not comment or len(comment) > 1500:
-            send_json(self, 400, {"error": "Enter a review (up to 1,500 characters)."})
+        if not message or len(message) > 500:
+            send_json(self, 400, {"error": "Enter a review (up to 500 characters)."})
             return
 
         try:
             with connect_database() as connection:
                 connection.execute(
-                    "INSERT INTO reviews (name, rating, comment) VALUES (?, ?, ?)",
-                    (name, rating, comment),
+                    "INSERT INTO reviews (name, rating, message) VALUES (?, ?, ?)",
+                    (name, rating, message),
                 )
         except (sqlite3.Error, OSError):
             self.log_error("Failed to save a review")
@@ -689,8 +810,51 @@ class JolizaHandler(SimpleHTTPRequestHandler):
         send_json(
             self,
             201,
-            {"message": "Thanks for sharing your review. It will appear after moderation."},
+            {
+                "success": True,
+                "message": "Thanks for sharing your review. It will appear after approval.",
+            },
         )
+
+    def update_review_status(self, review_id, status):
+        try:
+            body_length = int(self.headers.get("Content-Length", ""))
+        except (TypeError, ValueError):
+            body_length = 0
+        if body_length < 1 or body_length > 4096:
+            key = ""
+        else:
+            body = self.rfile.read(body_length)
+            if self.headers.get_content_type() == "application/x-www-form-urlencoded":
+                key = parse_qs(body.decode("utf-8", errors="replace")).get("key", [""])[0]
+            else:
+                key = ""
+        if not self.admin_key_is_valid(key):
+            self.send_admin_html(403, "<!doctype html><title>Forbidden</title><p>Forbidden.</p>")
+            return
+
+        try:
+            with connect_database() as connection:
+                cursor = connection.execute(
+                    "UPDATE reviews SET status = ? WHERE id = ?", (status, review_id)
+                )
+                if cursor.rowcount == 0:
+                    self.send_admin_html(
+                        404, "<!doctype html><title>Not found</title><p>Review not found.</p>"
+                    )
+                    return
+        except (sqlite3.Error, OSError) as error:
+            self.log_error("Failed to update review status: %r", error)
+            self.send_admin_html(
+                500, "<!doctype html><title>Error</title><p>Review couldn't be updated.</p>"
+            )
+            return
+
+        self.send_response(303)
+        self.send_header("Location", f"/admin/reviews?{urlencode({'key': key})}")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def chat(self):
         if self.headers.get_content_type() != "application/json":
@@ -761,6 +925,11 @@ class JolizaHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format, *args):
         # Keep form contents and email addresses out of request logs.
+        if args and isinstance(args[0], str):
+            args = (
+                re.sub(r"(/admin/reviews)\?[^ ]*", r"\1?[redacted]", args[0]),
+                *args[1:],
+            )
         super().log_message(format, *args)
 
 
