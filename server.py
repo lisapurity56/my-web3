@@ -8,6 +8,7 @@ import smtplib
 import ssl
 import sqlite3
 import sys
+import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from email.message import EmailMessage
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlsplit
+import urllib.request
 
 from backend.app.whatsapp_notifications import send_whatsapp_notification
 
@@ -60,8 +62,15 @@ if not DB_PATH.is_absolute():
 MAX_BODY_BYTES = 16 * 1024
 RATE_LIMIT_COUNT = 5
 RATE_LIMIT_WINDOW_SECONDS = 10 * 60
+REVIEW_RATE_LIMIT_COUNT = 3
+REVIEW_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
 SMTP_TIMEOUT_SECONDS = 10
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+REVIEW_EMAIL_PATTERN = re.compile(r"\b[^@\s]+@[^@\s]+\.[^@\s]+\b", re.IGNORECASE)
+REVIEW_LINK_PATTERN = re.compile(
+    r"(?:https?://|www\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b)", re.IGNORECASE
+)
+BLOCKED_WORDS = []
 ALLOWED_INQUIRY_TYPES = {"general", "order", "preorder", "event", "stockist"}
 ALLOWED_FLAVOURS = {"Vanilla", "Strawberry", "Banana", "Mango", "Coco", "Mixfruit"}
 MAX_FLAVOUR_QUANTITY = 50
@@ -175,6 +184,41 @@ def send_inquiry_notification(settings, inquiry_id, inquiry_type, name, email, m
     return True
 
 
+def _send_callmebot_review_message(url):
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            response.read()
+    except Exception as error:
+        print(
+            f"CallMeBot review notification failed ({type(error).__name__}).",
+            file=sys.stderr,
+        )
+
+
+def notify_new_review(rating, status, name, message):
+    phone = os.environ.get("WHATSAPP_PHONE", "").strip()
+    api_key = os.environ.get("WHATSAPP_APIKEY", "").strip()
+    if not phone or not api_key:
+        return
+
+    text = (
+        f"New Joliza review ({rating}/5, {status}): {name} - {message}. "
+        "Manage: https://www.joliza-yogourt.com/admin/reviews"
+    )
+    url = "https://api.callmebot.com/whatsapp.php?" + urlencode(
+        {"phone": phone, "text": text, "apikey": api_key}
+    )
+    try:
+        threading.Thread(
+            target=_send_callmebot_review_message, args=(url,), daemon=True
+        ).start()
+    except Exception as error:
+        print(
+            f"CallMeBot review notification failed ({type(error).__name__}).",
+            file=sys.stderr,
+        )
+
+
 def connect_database():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     connection = sqlite3.connect(DB_PATH, timeout=10)
@@ -201,6 +245,9 @@ def connect_database():
     review_columns = {
         row[1] for row in connection.execute("PRAGMA table_info(reviews)").fetchall()
     }
+    required_review_columns = {
+        "id", "name", "rating", "message", "status", "flagged", "ip", "created_at"
+    }
     if not review_columns:
         connection.execute(
             """
@@ -209,42 +256,68 @@ def connect_database():
                 name TEXT NOT NULL,
                 rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
                 message TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'approved', 'hidden')),
+                status TEXT NOT NULL DEFAULT 'hidden'
+                    CHECK (status IN ('approved', 'hidden')),
+                flagged INTEGER NOT NULL DEFAULT 0 CHECK (flagged IN (0, 1)),
+                ip TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
-    elif not {"id", "name", "rating", "message", "status", "created_at"} <= review_columns:
-        legacy_columns = {"id", "name", "rating", "comment", "approved", "created_at"}
-        if not legacy_columns <= review_columns:
-            connection.close()
-            raise sqlite3.DatabaseError("The reviews table has an unsupported schema.")
+    elif not required_review_columns <= review_columns:
+        message_column = "message" if "message" in review_columns else (
+            "comment" if "comment" in review_columns else None
+        )
+        id_value = "id" if "id" in review_columns else "rowid"
+        name_value = "COALESCE(name, '')" if "name" in review_columns else "''"
+        rating_value = (
+            "CASE WHEN rating BETWEEN 1 AND 5 THEN rating ELSE 1 END"
+            if "rating" in review_columns else "1"
+        )
+        message_value = f"COALESCE({message_column}, '')" if message_column else "''"
+        if "status" in review_columns:
+            status_value = "CASE WHEN status = 'approved' THEN 'approved' ELSE 'hidden' END"
+        elif "approved" in review_columns:
+            status_value = "CASE WHEN approved = 1 THEN 'approved' ELSE 'hidden' END"
+        else:
+            status_value = "'hidden'"
+        flagged_value = (
+            "CASE WHEN flagged = 1 THEN 1 ELSE 0 END"
+            if "flagged" in review_columns else "0"
+        )
+        ip_value = "COALESCE(ip, '')" if "ip" in review_columns else "''"
+        created_at_value = (
+            "COALESCE(created_at, CURRENT_TIMESTAMP)"
+            if "created_at" in review_columns else "CURRENT_TIMESTAMP"
+        )
         connection.execute("BEGIN")
-        connection.execute("ALTER TABLE reviews RENAME TO reviews_legacy")
         connection.execute(
             """
-            CREATE TABLE reviews (
+            CREATE TABLE reviews_migrating (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
                 message TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'approved', 'hidden')),
+                status TEXT NOT NULL DEFAULT 'hidden'
+                    CHECK (status IN ('approved', 'hidden')),
+                flagged INTEGER NOT NULL DEFAULT 0 CHECK (flagged IN (0, 1)),
+                ip TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
         connection.execute(
-            """
-            INSERT INTO reviews (id, name, rating, message, status, created_at)
-            SELECT id, name, rating, comment,
-                   CASE WHEN approved = 1 THEN 'approved' ELSE 'pending' END,
-                   created_at
-            FROM reviews_legacy
-            """
+            "INSERT INTO reviews_migrating "
+            "(id, name, rating, message, status, flagged, ip, created_at) "
+            f"SELECT {id_value}, {name_value}, {rating_value}, {message_value}, "
+            f"{status_value}, {flagged_value}, {ip_value}, {created_at_value} FROM reviews"
         )
-        connection.execute("DROP TABLE reviews_legacy")
+        connection.execute("DROP TABLE reviews")
+        connection.execute("ALTER TABLE reviews_migrating RENAME TO reviews")
+    else:
+        connection.execute(
+            "UPDATE reviews SET status = 'hidden' WHERE status NOT IN ('approved', 'hidden')"
+        )
     connection.commit()
     try:
         DB_PATH.chmod(0o600)
@@ -359,7 +432,9 @@ class JolizaHandler(SimpleHTTPRequestHandler):
 
     def admin_key_is_valid(self, key):
         configured_key = os.environ.get("ADMIN_KEY", "")
-        return bool(configured_key and key) and hmac.compare_digest(configured_key, key)
+        return bool(configured_key and key) and hmac.compare_digest(
+            configured_key.encode("utf-8"), key.encode("utf-8")
+        )
 
     def admin_reviews_page(self, status, message=""):
         key = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get("key", [""])[0]
@@ -371,7 +446,7 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             with connect_database() as connection:
                 reviews = connection.execute(
                     """
-                    SELECT id, name, rating, message, status, created_at
+                    SELECT id, name, rating, message, status, flagged, created_at
                     FROM reviews
                     ORDER BY created_at DESC, id DESC
                     """
@@ -384,7 +459,7 @@ class JolizaHandler(SimpleHTTPRequestHandler):
             return
 
         rows = []
-        for review_id, name, rating, review_message, review_status, created_at in reviews:
+        for review_id, name, rating, review_message, review_status, flagged, created_at in reviews:
             actions = "".join(
                 f"""
                 <form method="post" action="/admin/reviews/{review_id}/{action}">
@@ -401,6 +476,7 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                 f"<td>{rating}</td>"
                 f"<td>{html.escape(review_message)}</td>"
                 f"<td>{html.escape(review_status)}</td>"
+                f"<td>{'Yes' if flagged else 'No'}</td>"
                 f"<td>{html.escape(created_at)}</td>"
                 f"<td>{actions}</td>"
                 "</tr>"
@@ -409,10 +485,18 @@ class JolizaHandler(SimpleHTTPRequestHandler):
         page = (
             "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-            "<title>Review moderation</title><h1>Review moderation</h1>"
-            f"{notice}<table><thead><tr><th>ID</th><th>Name</th><th>Rating</th>"
-            "<th>Message</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>"
-            f"<tbody>{''.join(rows)}</tbody></table></html>"
+            "<title>Review moderation</title><style>"
+            "body{margin:2rem;font:16px/1.5 system-ui,sans-serif;color:#27332d}"
+            ".table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse}"
+            "th,td{padding:.65rem;text-align:left;vertical-align:top;border-bottom:1px solid #d5ddd1}"
+            "td:nth-child(4){min-width:16rem;overflow-wrap:anywhere}"
+            "form{display:inline-block;margin:.15rem}button{padding:.45rem .7rem;cursor:pointer}"
+            "@media(max-width:600px){body{margin:1rem}th,td{padding:.45rem}}</style>"
+            "<h1>Review moderation</h1>"
+            f"{notice}<div class=\"table-wrap\"><table><thead><tr><th>ID</th><th>Name</th><th>Rating</th>"
+            "<th>Message</th><th>Status</th><th>Flagged</th><th>Date</th>"
+            "<th>Actions</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table></div></html>"
         )
         self.send_admin_html(200, page)
 
@@ -763,18 +847,23 @@ class JolizaHandler(SimpleHTTPRequestHandler):
                 201,
                 {
                     "success": True,
-                    "message": "Thanks for sharing your review. It will appear after approval.",
+                    "message": "Thank you for your review!",
                 },
             )
             return
 
-        client_key = self.client_address[0]
+        forwarded_for = self.headers.get("X-Forwarded-For", "")
+        client_key = forwarded_for.split(",", 1)[0].strip() or self.client_address[0]
         submissions = recent_review_submissions[client_key]
         now = time.monotonic()
-        while submissions and now - submissions[0] >= RATE_LIMIT_WINDOW_SECONDS:
+        while submissions and now - submissions[0] >= REVIEW_RATE_LIMIT_WINDOW_SECONDS:
             submissions.popleft()
-        if len(submissions) >= RATE_LIMIT_COUNT:
-            send_json(self, 429, {"error": "Too many reviews. Please try again later."})
+        if len(submissions) >= REVIEW_RATE_LIMIT_COUNT:
+            send_json(
+                self,
+                429,
+                {"error": "You've reached the limit of 3 reviews per hour. Please try again later."},
+            )
             return
 
         name = payload.get("name")
@@ -783,36 +872,67 @@ class JolizaHandler(SimpleHTTPRequestHandler):
         if not isinstance(name, str) or type(rating) is not int or not isinstance(message, str):
             send_json(self, 400, {"error": "Invalid review data."})
             return
-        name = name.strip()
-        message = message.strip()
+        name = re.sub(r"<[^>]*>", "", name).strip()
+        message = re.sub(r"<[^>]*>", "", message).strip()
         if not name or len(name) > 60:
             send_json(self, 400, {"error": "Enter your name (up to 60 characters)."})
             return
         if not 1 <= rating <= 5:
             send_json(self, 400, {"error": "Choose a rating from 1 to 5 stars."})
             return
-        if not message or len(message) > 500:
-            send_json(self, 400, {"error": "Enter a review (up to 500 characters)."})
+        if len(message) < 10 or len(message) > 500:
+            send_json(self, 400, {"error": "Enter a review between 10 and 500 characters."})
             return
 
+        flagged = bool(
+            REVIEW_LINK_PATTERN.search(name)
+            or REVIEW_LINK_PATTERN.search(message)
+            or REVIEW_EMAIL_PATTERN.search(name)
+            or REVIEW_EMAIL_PATTERN.search(message)
+            or any(
+                word and re.search(rf"\b{re.escape(word)}\b", f"{name} {message}", re.IGNORECASE)
+                for word in BLOCKED_WORDS
+            )
+        )
+        review_status = "hidden" if flagged or rating < 4 else "approved"
+        submissions.append(now)
         try:
             with connect_database() as connection:
+                duplicate = connection.execute(
+                    """
+                    SELECT 1 FROM reviews
+                    WHERE name = ? AND message = ?
+                      AND datetime(created_at) >= datetime('now', '-24 hours')
+                    LIMIT 1
+                    """,
+                    (name, message),
+                ).fetchone()
+                if duplicate:
+                    send_json(
+                        self,
+                        201,
+                        {"success": True, "message": "Thank you for your review!"},
+                    )
+                    return
                 connection.execute(
-                    "INSERT INTO reviews (name, rating, message) VALUES (?, ?, ?)",
-                    (name, rating, message),
+                    """
+                    INSERT INTO reviews (name, rating, message, status, flagged, ip)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (name, rating, message, review_status, int(flagged), client_key),
                 )
         except (sqlite3.Error, OSError):
             self.log_error("Failed to save a review")
             send_json(self, 500, {"error": "We couldn't save your review. Please try again later."})
             return
 
-        submissions.append(now)
+        notify_new_review(rating, review_status, name, message)
         send_json(
             self,
             201,
             {
                 "success": True,
-                "message": "Thanks for sharing your review. It will appear after approval.",
+                "message": "Thank you for your review!",
             },
         )
 

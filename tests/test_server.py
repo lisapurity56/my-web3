@@ -8,7 +8,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 from unittest.mock import patch
 
 import server
@@ -77,7 +77,7 @@ class BackendTests(unittest.TestCase):
             headers={"Content-Type": "application/json"},
         )
 
-    def submit_review(self, **overrides):
+    def submit_review(self, headers=None, **overrides):
         payload = {
             "name": "Test Reviewer",
             "rating": 5,
@@ -88,7 +88,7 @@ class BackendTests(unittest.TestCase):
             "/api/reviews",
             method="POST",
             body=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **(headers or {})},
         )
 
     def submit_chat(self, messages):
@@ -208,26 +208,33 @@ class BackendTests(unittest.TestCase):
             }],
         )
 
-    def test_review_submission_is_saved_for_moderation(self):
-        status, payload = self.submit_review()
+    def test_review_submission_is_approved_immediately(self):
+        status, payload = self.submit_review(
+            headers={"X-Forwarded-For": "203.0.113.10, 10.0.0.1"}
+        )
         self.assertEqual(status, 201)
         self.assertTrue(payload["success"])
-        self.assertIn("approval", payload["message"])
+        self.assertEqual(payload["message"], "Thank you for your review!")
 
         with server.connect_database() as connection:
             review = connection.execute(
-                "SELECT name, rating, message, status FROM reviews"
+                "SELECT name, rating, message, status, flagged, ip FROM reviews"
             ).fetchone()
-        self.assertEqual(review, ("Test Reviewer", 5, "Creamy and delicious.", "pending"))
+        self.assertEqual(
+            review,
+            ("Test Reviewer", 5, "Creamy and delicious.", "approved", 0, "203.0.113.10"),
+        )
 
         status, public_reviews = self.request("/api/reviews")
         self.assertEqual(status, 200)
-        self.assertEqual(public_reviews, [])
+        self.assertEqual(len(public_reviews), 1)
+        self.assertEqual(public_reviews[0]["name"], "Test Reviewer")
 
     def test_invalid_review_is_rejected(self):
         status, payload = self.submit_review(rating=6)
         self.assertEqual(status, 400)
         self.assertIn("rating", payload["error"])
+        self.assertEqual(self.submit_review(message="Too short")[0], 400)
 
     def test_review_limits_and_schema_migration(self):
         self.assertEqual(self.submit_review(name="N" * 61)[0], 400)
@@ -259,7 +266,91 @@ class BackendTests(unittest.TestCase):
             migrated = connection.execute(
                 "SELECT name, message, status FROM reviews"
             ).fetchone()
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(reviews)")
+            }
         self.assertEqual(migrated, ("Old Reviewer", "Still lovely.", "approved"))
+        self.assertTrue({"flagged", "ip"} <= columns)
+
+    def test_review_status_flags_and_html_stripping(self):
+        self.submit_review(name="Low Rater", rating=2, message="A perfectly valid review.")
+        self.submit_review(
+            name="<b>Link User</b>",
+            rating=5,
+            message="Visit https://example.com for more details.",
+        )
+        self.submit_review(
+            name="<i>Clean User</i>",
+            rating=4,
+            message="<script>alert(1)</script> Lovely yogurt experience.",
+        )
+
+        with server.connect_database() as connection:
+            rows = connection.execute(
+                "SELECT name, message, status, flagged FROM reviews ORDER BY id"
+            ).fetchall()
+        self.assertEqual(rows[0][2:], ("hidden", 0))
+        self.assertEqual(rows[1], ("Link User", "Visit https://example.com for more details.", "hidden", 1))
+        self.assertEqual(rows[2], ("Clean User", "alert(1) Lovely yogurt experience.", "approved", 0))
+
+    def test_honeypot_and_duplicate_reviews_are_not_notified_twice(self):
+        with patch.object(server, "notify_new_review") as notify:
+            status, payload = self.submit_review(website="filled by a bot")
+            self.assertEqual(status, 201)
+            self.assertEqual(payload["message"], "Thank you for your review!")
+            with server.connect_database() as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 0)
+            notify.assert_not_called()
+
+            self.submit_review()
+            self.submit_review()
+            with server.connect_database() as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1)
+            notify.assert_called_once()
+
+    def test_review_rate_limit_uses_first_forwarded_ip(self):
+        headers = {"X-Forwarded-For": "203.0.113.20, 10.0.0.1"}
+        for index in range(server.REVIEW_RATE_LIMIT_COUNT):
+            self.assertEqual(
+                self.submit_review(headers=headers, message=f"Review number {index} is unique.")[0],
+                201,
+            )
+        status, payload = self.submit_review(headers=headers, message="A fourth unique review.")
+        self.assertEqual(status, 429)
+        self.assertIn("3 reviews per hour", payload["error"])
+
+    def test_callmebot_review_message_is_encoded_and_sent_in_background(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"WHATSAPP_PHONE": "12345", "WHATSAPP_APIKEY": "secret-api", "ADMIN_KEY": "admin-secret"},
+            ),
+            patch.object(server.threading, "Thread") as thread,
+        ):
+            server.notify_new_review(4, "approved", "Reviewer", "Lovely and creamy.")
+
+        thread.assert_called_once()
+        thread.assert_called_once_with(
+            target=server._send_callmebot_review_message,
+            args=(thread.call_args.kwargs["args"][0],),
+            daemon=True,
+        )
+        url = thread.call_args.kwargs["args"][0]
+        query = parse_qs(urlsplit(url).query)
+        self.assertEqual(urlsplit(url).scheme, "https")
+        self.assertEqual(urlsplit(url).netloc, "api.callmebot.com")
+        self.assertEqual(query["phone"], ["12345"])
+        self.assertEqual(query["apikey"], ["secret-api"])
+        self.assertEqual(
+            query["text"][0],
+            "New Joliza review (4/5, approved): Reviewer - Lovely and creamy.. "
+            "Manage: https://www.joliza-yogourt.com/admin/reviews",
+        )
+        self.assertNotIn("admin-secret", query["text"][0])
+
+        with patch.object(server.urllib.request, "urlopen") as urlopen:
+            server._send_callmebot_review_message(url)
+        urlopen.assert_called_once_with(url, timeout=10)
 
     def test_admin_can_approve_and_hide_reviews(self):
         with server.connect_database() as connection:

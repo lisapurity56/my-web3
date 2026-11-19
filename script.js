@@ -705,6 +705,7 @@ reviewForm?.addEventListener("submit", async (event) => {
         name: formData.get("name"),
         rating: Number(formData.get("rating")),
         message: formData.get("message"),
+        website: formData.get("website"),
       }),
     });
     const result = await response.json();
@@ -716,11 +717,8 @@ reviewForm?.addEventListener("submit", async (event) => {
     }
 
     reviewForm.reset();
-    showReviewStatus(
-      typeof result.message === "string"
-        ? result.message
-        : "Thanks for sharing your review. It will appear after approval.",
-    );
+    showReviewStatus("Thank you for your review!");
+    loadReviews();
   } catch (error) {
     console.error("Unable to submit review.", error);
     showReviewStatus(
